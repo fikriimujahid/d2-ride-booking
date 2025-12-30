@@ -69,6 +69,31 @@ module "networking" {
 }
 
 # ============================================================================
+# Database Module
+# ============================================================================
+module "database" {
+  source = "../../modules/database"
+
+  project     = var.project
+  environment = var.environment
+
+  vpc_id             = module.networking.vpc_id
+  private_subnet_ids = module.networking.private_subnet_ids
+  allowed_security_groups = [
+    module.networking.app_security_group_id,
+    module.networking.bastion_security_group_id
+  ]
+
+  # Database Configuration
+  rds_instance_class    = var.rds_instance_class
+  rds_allocated_storage = var.rds_allocated_storage
+
+  # Dev configuration (fixed)
+  multi_az     = false # Single-AZ for dev
+  enable_redis = false # Redis only for prod
+}
+
+# ============================================================================
 # DNS & ACM Module
 # ============================================================================
 # module "dns" {
