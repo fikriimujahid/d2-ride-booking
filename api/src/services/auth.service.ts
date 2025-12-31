@@ -75,8 +75,9 @@ export class AuthService {
                 throw new AppError('Failed to retrieve User ID from Cognito', 500, 'COGNITO_ERROR');
             }
 
-        } catch (error: any) {
-            if (error.name === 'UsernameExistsException') {
+        } catch (error) {
+            const err = error as { name?: string };
+            if (err.name === 'UsernameExistsException') {
                 throw new ConflictError('User with this email already exists in auth system');
             }
             logger.error('Cognito Signup failed', error);
@@ -104,7 +105,7 @@ export class AuthService {
                 message: 'Signup successful. Please verify your email.'
             };
 
-        } catch (dbError: any) {
+        } catch (dbError) {
             logger.error('Database creation failed. Rolling back Cognito user.', dbError);
 
             // C. Rollback: Delete user from Cognito if DB creation fails
@@ -124,7 +125,8 @@ export class AuthService {
             }
 
             // If it was a unique constraint violation that slipped through (race condition), handle it
-            if (dbError.code === 'P2002') {
+            const dbErr = dbError as { code?: string };
+            if (dbErr.code === 'P2002') {
                 throw new ConflictError('User details already exist');
             }
 
@@ -144,11 +146,12 @@ export class AuthService {
 
             await cognitoClient.send(command);
             return { message: 'Email verified successfully' };
-        } catch (error: any) {
-            if (error.name === 'CodeMismatchException') {
+        } catch (error) {
+            const err = error as { name?: string };
+            if (err.name === 'CodeMismatchException') {
                 throw new AppError('Invalid verification code', 400, 'INVALID_CODE');
             }
-            if (error.name === 'ExpiredCodeException') {
+            if (err.name === 'ExpiredCodeException') {
                 throw new AppError('Verification code expired', 400, 'EXPIRED_CODE');
             }
             throw error;
@@ -183,11 +186,12 @@ export class AuthService {
                 token_type: result.TokenType
             };
 
-        } catch (error: any) {
-            if (error.name === 'NotAuthorizedException') {
+        } catch (error) {
+            const err = error as { name?: string };
+            if (err.name === 'NotAuthorizedException') {
                 throw new UnauthorizedError('Invalid email or password');
             }
-            if (error.name === 'UserNotConfirmedException') {
+            if (err.name === 'UserNotConfirmedException') {
                 throw new AppError('Email not verified', 403, 'USER_NOT_CONFIRMED');
             }
             logger.error('Login failed', error);

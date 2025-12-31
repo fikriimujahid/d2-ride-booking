@@ -2,7 +2,7 @@ import { Response } from 'express';
 
 export function successResponse(
     res: Response,
-    data: any,
+    data: unknown,
     message = 'Success',
     statusCode = 200
 ) {
@@ -16,7 +16,7 @@ export function successResponse(
 
 export function paginatedResponse(
     res: Response,
-    data: any[],
+    data: unknown[],
     page: number,
     limit: number,
     totalItems: number

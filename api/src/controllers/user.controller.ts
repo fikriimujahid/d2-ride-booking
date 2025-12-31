@@ -13,7 +13,7 @@ export class UserController {
 
     async getMe(req: Request, res: Response, next: NextFunction) {
         try {
-            const userId = req.user.id;
+            const userId = req.user!.id;
             const result = await userService.getProfile(userId);
             return successResponse(res, result, 'User profile retrieved successfully');
         } catch (error) {
@@ -23,7 +23,7 @@ export class UserController {
 
     async updateMe(req: Request, res: Response, next: NextFunction) {
         try {
-            const userId = req.user.id;
+            const userId = req.user!.id;
             const data = updateProfileSchema.parse(req.body);
             const result = await userService.updateProfile(userId, data);
             return successResponse(res, result, 'Profile updated successfully');

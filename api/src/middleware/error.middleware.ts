@@ -3,6 +3,10 @@ import { logger } from '../config/logger';
 import { AppError } from '../utils/error.util';
 import { Prisma } from '@prisma/client';
 
+interface RequestWithUser extends Request {
+    id?: string;
+}
+
 export function errorHandler(
     error: Error,
     req: Request,
@@ -15,8 +19,7 @@ export function errorHandler(
         stack: error.stack,
         url: req.url,
         method: req.method,
-        // @ts-ignore
-        user_id: req.user?.id
+        user_id: (req as RequestWithUser).user?.id
     });
 
     // Handle custom app errors
@@ -29,8 +32,7 @@ export function errorHandler(
                 details: error.details
             },
             timestamp: new Date().toISOString(),
-            // @ts-ignore
-            request_id: req.id
+            request_id: (req as RequestWithUser).id
         });
     }
 

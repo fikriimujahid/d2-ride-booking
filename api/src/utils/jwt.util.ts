@@ -18,17 +18,17 @@ export const verifyJWT = async (token: string) => {
         // For development/mocking purposes when Cognito isn't set up
         if (process.env.NODE_ENV === 'development' && process.env.MOCK_AUTH === 'true') {
             const decoded = jwt.decode(token);
-            return decoded as any;
+            return decoded as { sub: string; email: string; 'custom:role': string };
         }
 
         const payload = await verifier.verify(token);
         return payload;
-    } catch (error) {
+    } catch {
         throw new Error("Invalid token");
     }
 };
 
-export const generateJWT = (payload: any) => {
+export const generateJWT = (payload: object) => {
     // Helper for tests
     return jwt.sign(payload, 'secret', { expiresIn: '1h' });
 }

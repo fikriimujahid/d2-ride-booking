@@ -3,12 +3,15 @@ import { verifyJWT } from '../utils/jwt.util';
 import { UnauthorizedError } from '../utils/error.util';
 
 // Extend Express Request type
-declare global {
-    namespace Express {
-        interface Request {
-            user?: any;
-        }
-    }
+interface UserPayload {
+    id: string;
+    email: string;
+    role: string;
+}
+
+// Extend Express Request type locally for this module
+interface AuthenticatedRequest extends Request {
+    user?: UserPayload;
 }
 
 export async function authenticateJWT(req: Request, _res: Response, next: NextFunction) {
@@ -23,14 +26,14 @@ export async function authenticateJWT(req: Request, _res: Response, next: NextFu
         const payload = await verifyJWT(token);
 
         // Attach user info to request object
-        req.user = {
+        (req as AuthenticatedRequest).user = {
             id: payload.sub,
-            email: payload['email'], // Cognito specific
-            role: payload['custom:role'] || 'passenger'
+            email: payload['email'] as string, // Cognito specific
+            role: (payload['custom:role'] || 'passenger') as string
         };
 
         next();  // Proceed to next middleware
-    } catch (error) {
+    } catch {
         next(new UnauthorizedError('Invalid or expired token'));
     }
 }

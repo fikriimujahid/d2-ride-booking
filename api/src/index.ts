@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 dotenv.config();
+import './types/express-init';
 
 import app from './app';
 // import { createServer } from 'http';

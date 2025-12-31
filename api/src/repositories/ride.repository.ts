@@ -1,5 +1,5 @@
 import { prisma } from '../config/database';
-import { Ride, Prisma } from '@prisma/client';
+import { Ride, Prisma, RideStatus } from '@prisma/client';
 import { BaseRepository } from './base.repository';
 
 export class RideRepository extends BaseRepository<Ride> {
@@ -18,7 +18,7 @@ export class RideRepository extends BaseRepository<Ride> {
         });
     }
 
-    async updateStatus(id: string, status: any): Promise<Ride> {
+    async updateStatus(id: string, status: RideStatus): Promise<Ride> {
         return prisma.ride.update({
             where: { id },
             data: { status }

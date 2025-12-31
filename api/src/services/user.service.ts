@@ -37,7 +37,7 @@ export class UserService {
                 : user._count.rides_as_passenger;
 
             // Remove _count from result before returning
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
             const { _count, ...userData } = user;
 
             return {
