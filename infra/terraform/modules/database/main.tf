@@ -25,9 +25,9 @@ resource "aws_secretsmanager_secret" "db_secret" {
 
 resource "aws_secretsmanager_secret_version" "db_secret_val" {
   secret_id = aws_secretsmanager_secret.db_secret.id
-  secret_string = jsonencode({
+  secret_string = jsonencode({ // pragma: allowlist secret
     username = "admin"
-    password = random_password.db_password.result
+    password = random_password.db_password.result // pragma: allowlist secret
     host     = aws_db_instance.main.address
     port     = aws_db_instance.main.port
     dbname   = aws_db_instance.main.db_name
@@ -101,7 +101,7 @@ resource "aws_db_instance" "main" {
   storage_type      = "gp3"
 
   username = "admin"
-  password = random_password.db_password.result
+  password = random_password.db_password.result                     // pragma: allowlist secret
   db_name  = replace("${var.project}_${var.environment}", "-", "_") # e.g. d2_dev
 
   db_subnet_group_name   = aws_db_subnet_group.main.name

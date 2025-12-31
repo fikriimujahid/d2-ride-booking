@@ -1,0 +1,117 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  phone_number      String   @unique
+  full_name         String
+  role              Role     @default(PASSENGER)
+  profile_photo_url String?
+  rating            Float    @default(5.0)
+  is_online         Boolean  @default(false)
+  created_at        DateTime @default(now())
+  updated_at        DateTime @updatedAt
+  
+  // Relations
+  rides_as_passenger Ride[]   @relation("PassengerRides")
+  rides_as_driver    Ride[]   @relation("DriverRides")
+  payments           Payment[]
+  vehicle            Vehicle?
+  
+  @@index([email])
+  @@index([role, is_online])
+}
+
+enum Role {
+  PASSENGER
+  DRIVER
+  ADMIN
+}
+
+model Ride {
+  id                       String   @id @default(uuid())
+  passenger_id             String
+  driver_id                String?
+  status                   RideStatus @default(SEARCHING)
+  pickup_latitude          Float
+  pickup_longitude         Float
+  pickup_address           String
+  dropoff_latitude         Float
+  dropoff_longitude        Float
+  dropoff_address          String
+  estimated_distance_km    Float
+  estimated_duration_min   Int
+  estimated_fare           Float
+  actual_distance_km       Float?
+  actual_duration_min      Int?
+  final_fare               Float?
+  created_at               DateTime @default(now())
+  accepted_at              DateTime?
+  started_at               DateTime?
+  completed_at             DateTime?
+  cancelled_at             DateTime?
+  
+  // Relations
+  passenger                User     @relation("PassengerRides", fields: [passenger_id], references: [id])
+  driver                   User?    @relation("DriverRides", fields: [driver_id], references: [id])
+  payment                  Payment?
+  
+  @@index([passenger_id])
+  @@index([driver_id])
+  @@index([status])
+}
+
+enum RideStatus {
+  SEARCHING
+  ACCEPTED
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Payment {
+  id                      String   @id @default(uuid())
+  ride_id                 String   @unique
+  user_id                 String
+  amount                  Float
+  currency                String   @default("USD")
+  stripe_payment_intent_id String
+  status                  PaymentStatus
+  created_at              DateTime @default(now())
+  
+  // Relations
+  ride                    Ride     @relation(fields: [ride_id], references: [id])
+  user                    User     @relation(fields: [user_id], references: [id])
+  
+  @@index([user_id])
+  @@index([status])
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Vehicle {
+  id          String @id @default(uuid())
+  user_id     String @unique
+  make        String
+  model       String
+  year        Int
+  color       String
+  plate_number String @unique
+  
+  user        User   @relation(fields: [user_id], references: [id])
+}

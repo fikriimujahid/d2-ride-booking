@@ -107,3 +107,18 @@ output "github_actions_deploy_role_arn" {
   description = "ARN of the github_actions_deploy_role"
   value       = module.iam_roles.github_actions_deploy_role_arn
 }
+
+output "ridebooking_ec2_api_profile_name" {
+  description = "Name of the instance profile for API instances"
+  value       = module.iam_roles.ridebooking_ec2_api_profile_name
+}
+
+output "ridebooking_ec2_websocket_profile_name" {
+  description = "Name of the instance profile for WebSocket instances"
+  value       = module.iam_roles.ridebooking_ec2_websocket_profile_name
+}
+
+output "ridebooking_bastion_profile_name" {
+  description = "Name of the instance profile for Bastion host"
+  value       = module.iam_roles.ridebooking_bastion_profile_name
+}

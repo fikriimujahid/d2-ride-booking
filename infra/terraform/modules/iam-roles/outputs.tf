@@ -25,3 +25,21 @@ output "github_actions_deploy_role_arn" {
   description = "ARN of the github_actions_deploy_role"
   value       = aws_iam_role.github_actions_deploy_role.arn
 }
+
+# ============================================================================
+# Instance Profile Outputs
+# ============================================================================
+output "ridebooking_ec2_api_profile_name" {
+  description = "Name of the instance profile for API instances"
+  value       = aws_iam_instance_profile.ridebooking_ec2_api_profile.name
+}
+
+output "ridebooking_ec2_websocket_profile_name" {
+  description = "Name of the instance profile for WebSocket instances"
+  value       = aws_iam_instance_profile.ridebooking_ec2_websocket_profile.name
+}
+
+output "ridebooking_bastion_profile_name" {
+  description = "Name of the instance profile for Bastion host"
+  value       = aws_iam_instance_profile.ridebooking_bastion_profile.name
+}

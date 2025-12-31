@@ -19,6 +19,12 @@ variable "aws_region" {
   default     = "ap-southeast-1"
 }
 
+variable "github_repo" {
+  description = "GitHub repository name (org/repo)"
+  type        = string
+  default     = "fikriimujahid/d2-ride-booking" # Adjust default as needed
+}
+
 # ============================================================================
 # Networking Module Variables
 # ============================================================================
@@ -59,4 +65,22 @@ variable "rds_allocated_storage" {
   description = "Allocated storage for RDS in GB"
   type        = number
   default     = 20
+}
+
+# ============================================================================
+# Compute Module Variables
+# ============================================================================
+variable "instance_type_api" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "instance_type_websocket" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "instance_type_bastion" {
+  type    = string
+  default = "t3.micro"
 }

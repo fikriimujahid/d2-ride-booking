@@ -1,0 +1,12 @@
+{
+    "watch": [
+        "src"
+    ],
+    "delay": "1000",
+    "ext": "ts,json",
+    "ignore": [
+        "logs/**",
+        "*.log"
+    ],
+    "exec": "ts-node src/index.ts"
+}
