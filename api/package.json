@@ -11,7 +11,10 @@
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write src/**/*.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
+    "prisma:push": "prisma db push",
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:seed:superadmin": "ts-node prisma/seed.superadmin.ts",
+    "db:update": "prisma db push && prisma generate && ts-node prisma/seed.ts",
     "swagger": "ts-node src/swagger.ts"
   },
   "keywords": [],

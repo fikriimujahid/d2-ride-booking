@@ -13,7 +13,7 @@ model User {
   email             String   @unique
   phone_number      String   @unique
   full_name         String
-  role              Role     @default(PASSENGER)
+  system_role       SystemRole @default(PASSENGER)
   profile_photo_url String?
   rating            Float    @default(5.0)
   is_online         Boolean  @default(false)
@@ -25,15 +25,58 @@ model User {
   rides_as_driver    Ride[]   @relation("DriverRides")
   payments           Payment[]
   vehicle            Vehicle?
+  roles              UserRole[]
   
   @@index([email])
-  @@index([role, is_online])
+  @@index([system_role, is_online])
 }
 
-enum Role {
+enum SystemRole {
   PASSENGER
   DRIVER
   ADMIN
+}
+
+// Layer 2: Fine-Grained RBAC
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g. SUPER_ADMIN, OPS_MANAGER
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  key         String   @unique // e.g. MANAGE_RIDES
+  description String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  role_id       String
+  permission_id String
+  
+  role          Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
+  permission    Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+
+  @@id([role_id, permission_id])
+}
+
+model UserRole {
+  user_id String
+  role_id String
+  
+  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  role    Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+
+  @@id([user_id, role_id])
 }
 
 model Ride {

@@ -5,7 +5,9 @@ declare module "express" {
         user?: {
             id: string;
             email: string;
-            role: string;
+            system_role: string;
+            roles: string[];
+            permissions: string[];
         };
     }
 }

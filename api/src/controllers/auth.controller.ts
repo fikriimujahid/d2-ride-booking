@@ -2,6 +2,12 @@ import { Request, Response, NextFunction } from 'express';
 import { authService } from '../services/auth.service';
 import { successResponse } from '../utils/response.util';
 import { z } from 'zod';
+import { PRIVILEGED_SYSTEM_ROLES, type PrivilegedSystemRoleName } from '../constants/roles';
+import { ForbiddenError } from '../utils/error.util';
+
+function isPrivilegedSystemRole(role: string): role is PrivilegedSystemRoleName {
+    return (PRIVILEGED_SYSTEM_ROLES as readonly string[]).includes(role);
+}
 
 // Validation Schemas (Could move to validator file)
 const signupSchema = z.object({
@@ -9,7 +15,8 @@ const signupSchema = z.object({
     password: z.string().min(8),
     full_name: z.string().min(2),
     phone_number: z.string().min(10),
-    role: z.enum(['PASSENGER', 'DRIVER'])
+    // Role comes from DB (Role.name). Validation happens in AuthService.
+    role: z.string().min(1)
 });
 
 const loginSchema = z.object({
@@ -35,7 +42,13 @@ export class AuthController {
             // or rely on route middleware if we move schema.
             const data = signupSchema.parse(req.body);
 
-            const result = await authService.signup(data);
+            // Safety net: even if routes change, never allow anonymous signup for privileged system roles.
+            const isPublicRequest = !req.user;
+            if (isPublicRequest && isPrivilegedSystemRole(data.role)) {
+                return next(new ForbiddenError('Public signup for this role is not allowed'));
+            }
+
+            const result = await authService.signup(data, { isPublicRequest });
             return successResponse(res, result, 'User registered successfully', 201);
         } catch (error) {
             return next(error);

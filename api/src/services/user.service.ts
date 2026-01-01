@@ -14,7 +14,7 @@ export class UserService {
                     email: true,
                     full_name: true,
                     phone_number: true,
-                    role: true,
+                    system_role: true,
                     profile_photo_url: true,
                     rating: true,
                     created_at: true,
@@ -32,7 +32,7 @@ export class UserService {
                 throw new AppError('User not found', 404, 'USER_NOT_FOUND');
             }
 
-            const total_rides = user.role === 'DRIVER'
+            const total_rides = user.system_role === 'DRIVER'
                 ? user._count.rides_as_driver
                 : user._count.rides_as_passenger;
 

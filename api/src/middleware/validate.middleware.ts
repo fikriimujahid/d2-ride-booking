@@ -10,7 +10,7 @@ export function validate(schema: ZodSchema) {
             next();
         } catch (error) {
             if (error instanceof ZodError) {
-                next(new ValidationError(error.errors));
+                next(new ValidationError(error.issues));
             } else {
                 next(error);
             }

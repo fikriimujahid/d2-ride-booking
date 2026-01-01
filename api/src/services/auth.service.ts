@@ -8,9 +8,12 @@ import {
     AdminUpdateUserAttributesCommand
 } from "@aws-sdk/client-cognito-identity-provider";
 import crypto from 'crypto';
+import { SystemRole } from '@prisma/client';
 import { prisma } from '../config/database';
 import { logger } from '../config/logger';
-import { AppError, UnauthorizedError, ConflictError } from '../utils/error.util';
+import { AppError, UnauthorizedError, ConflictError, NotFoundError, ForbiddenError } from '../utils/error.util';
+import { PRIVILEGED_SYSTEM_ROLES, SYSTEM_ROLES } from '../constants/roles';
+
 
 // Initialize Cognito Client
 const cognitoClient = new CognitoIdentityProviderClient({
@@ -30,8 +33,36 @@ export class AuthService {
             .digest('base64');
     }
 
+    // Helper: Derive coarse SystemRole from a DB Role.name
+    // Any non-PASSENGER/DRIVER role is treated as ADMIN (e.g. SUPER_ADMIN, SUPPORT_AGENT).
+    private deriveSystemRoleFromRoleName(roleName: string): SystemRole {
+        if (roleName === SYSTEM_ROLES.DRIVER) return SYSTEM_ROLES.DRIVER;
+        if (roleName === SYSTEM_ROLES.PASSENGER) return SYSTEM_ROLES.PASSENGER;
+        return SYSTEM_ROLES.ADMIN;
+    }
+
     // 1. Sign Up (Create User in Cognito + DB)
-    async signup(data: { email: string; password: string; full_name: string; phone_number: string; role: 'PASSENGER' | 'DRIVER' }) {
+    async signup(
+        data: { email: string; password: string; full_name: string; phone_number: string; role: string },
+        opts?: { isPublicRequest?: boolean }
+    ) {
+        // 0. Validate role exists in DB (Role.name is source of truth)
+        const dbRole = await prisma.role.findUnique({ where: { name: data.role } });
+        if (!dbRole) {
+            throw new NotFoundError(`Role not found: ${data.role}`);
+        }
+
+        // 0b. Block anonymous signup for privileged system roles
+        const derivedSystemRole = this.deriveSystemRoleFromRoleName(dbRole.name);
+        if (opts?.isPublicRequest) {
+            if (derivedSystemRole === SYSTEM_ROLES.ADMIN) {
+                throw new ForbiddenError('Public signup for admin roles is not allowed');
+            }
+            if ((PRIVILEGED_SYSTEM_ROLES as readonly SystemRole[]).includes(derivedSystemRole)) {
+                throw new ForbiddenError('Public signup for this role is not allowed');
+            }
+        }
+
         // 0. Pre-check: Verify if user already exists in DB
         const existingUser = await prisma.user.findFirst({
             where: {
@@ -64,7 +95,7 @@ export class AuthService {
                     { Name: "email", Value: data.email },
                     { Name: "name", Value: data.full_name },
                     { Name: "phone_number", Value: data.phone_number },
-                    { Name: "custom:role", Value: data.role }
+                    { Name: "custom:role", Value: derivedSystemRole }
                 ]
             });
 
@@ -86,15 +117,28 @@ export class AuthService {
 
         try {
             // B. Create in Database (Linked by UserSub)
-            await prisma.user.create({
-                data: {
-                    id: userId,
-                    email: data.email,
-                    full_name: data.full_name,
-                    phone_number: data.phone_number,
-                    role: data.role === 'PASSENGER' ? 'PASSENGER' : data.role === 'DRIVER' ? 'DRIVER' : 'PASSENGER',
-                    is_online: false
-                }
+            // Use transaction to create User and UserRole if needed
+            await prisma.$transaction(async (tx) => {
+                const systemRole = derivedSystemRole;
+
+                const newUser = await tx.user.create({
+                    data: {
+                        id: userId,
+                        email: data.email,
+                        full_name: data.full_name,
+                        phone_number: data.phone_number,
+                        system_role: systemRole,
+                        is_online: false
+                    }
+                });
+
+                // Always assign DB role (fine-grained layer) by role.name
+                await tx.userRole.create({
+                    data: {
+                        user_id: newUser.id,
+                        role_id: dbRole.id
+                    }
+                });
             });
 
             logger.info(`User created: ${userId} (${data.role})`);
@@ -182,8 +226,12 @@ export class AuthService {
                 access_token: result.AccessToken,
                 id_token: result.IdToken,
                 refresh_token: result.RefreshToken,
-                expires_in: result.ExpiresIn,
-                token_type: result.TokenType
+                token_type: result.TokenType,
+                user: {
+                    email,
+                    // We need to fetch the user to get the real role
+                    ...await this.getUserProfile(email)
+                }
             };
 
         } catch (error) {
@@ -246,7 +294,6 @@ export class AuthService {
         }
     }
 
-    // 6. Update User Attributes
     async updateUserAttributes(username: string, attributes: { full_name?: string; phone_number?: string }) {
         try {
             const userAttributes = [];
@@ -276,7 +323,53 @@ export class AuthService {
             throw new AppError('Failed to update user profile in authentication system', 500, 'COGNITO_UPDATE_ERROR');
         }
     }
+
+    // Helper to get user profile by email for login response
+    private async getUserProfile(email: string) {
+        const user = await prisma.user.findUnique({
+            where: { email },
+            include: {
+                roles: {
+                    include: {
+                        role: {
+                            include: {
+                                permissions: {
+                                    include: {
+                                        permission: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!user) {
+            throw new NotFoundError("User profile not found in database");
+        }
+
+        // Flatten permissions
+        const permissions = new Set<string>();
+        const fineGrainedRoles: string[] = [];
+
+        user.roles.forEach(ur => {
+            fineGrainedRoles.push(ur.role.name);
+            ur.role.permissions.forEach(rp => {
+                permissions.add(rp.permission.key);
+            });
+        });
+
+        return {
+            id: user.id,
+            full_name: user.full_name,
+            system_role: user.system_role,
+            roles: fineGrainedRoles,
+            permissions: Array.from(permissions)
+        };
+    }
 }
 
 
 export const authService = new AuthService();
+
