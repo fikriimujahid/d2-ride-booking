@@ -75,6 +75,11 @@ module "auth" {
   project     = var.project
   environment = var.environment
   tags        = local.common_tags
+
+  cognito_tier             = var.cognito_tier
+  password_min_length      = var.password_min_length
+  enable_mfa               = var.enable_mfa
+  enable_advanced_security = var.enable_advanced_security
 }
 
 # ============================================================================

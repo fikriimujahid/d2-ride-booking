@@ -1,5 +1,8 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+
+import { env } from './env';
 
 export const prisma = new PrismaClient({
-    log: ['query', 'info', 'warn', 'error'],
+	adapter: new PrismaMariaDb(env.DATABASE_URL)
 });

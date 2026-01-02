@@ -1,79 +1,55 @@
-import { Request, Response, NextFunction } from 'express';
-import { verifyJWT } from '../utils/jwt.util';
-import { UnauthorizedError } from '../utils/error.util';
-import { prisma } from '../config/database';
+import type { RequestHandler } from 'express';
+import { UnauthorizedError } from '../models/error.model.js';
+import { verifyCognitoJwt } from '../utils/jwt.util.js';
+import type { SystemGroup } from '../models/auth.model.js';
 
-// Extend Express Request type
-interface UserPayload {
-    id: string;
-    email: string;
-    system_role: string;
-    roles: string[];
-    permissions: string[];
+function parseBearerToken(headerValue: string | undefined): string | null {
+  if (!headerValue) return null;
+  const [scheme, token] = headerValue.split(' ');
+  if (scheme?.toLowerCase() !== 'bearer' || !token) return null;
+  return token;
 }
 
-// Extend Express Request type locally for this module
-interface AuthenticatedRequest extends Request {
-    user?: UserPayload;
+function normalizeGroups(value: unknown): SystemGroup[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((g) => typeof g === 'string')
+    .filter((g): g is SystemGroup => g === 'Admin' || g === 'Passenger' || g === 'Driver');
 }
 
-export async function authenticateJWT(req: Request, _res: Response, next: NextFunction) {
-    try {
-        const authHeader = req.headers.authorization;
-
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            throw new UnauthorizedError('Missing or invalid authorization header');
-        }
-
-        const token = authHeader.substring(7);  // Remove "Bearer "
-        const payload = await verifyJWT(token);
-
-        // Fetch user from DB to get granular role and permissions
-        const user = await prisma.user.findUnique({
-            where: { id: payload.sub },
-            include: {
-                roles: {
-                    include: {
-                        role: {
-                            include: {
-                                permissions: {
-                                    include: {
-                                        permission: true
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-
-        if (!user) {
-            throw new UnauthorizedError('User not found in system');
-        }
-
-        // Flatten permissions and roles
-        const permissions = new Set<string>();
-        const roles = new Set<string>();
-
-        user.roles.forEach(ur => {
-            roles.add(ur.role.name);
-            ur.role.permissions.forEach(rp => {
-                permissions.add(rp.permission.key);
-            });
-        });
-
-        // Attach user info to request object
-        (req as AuthenticatedRequest).user = {
-            id: payload.sub,
-            email: payload['email'] as string, // Cognito specific
-            system_role: user.system_role,
-            roles: Array.from(roles),
-            permissions: Array.from(permissions)
-        };
-
-        next();  // Proceed to next middleware
-    } catch {
-        next(new UnauthorizedError('Invalid or expired token'));
-    }
+function normalizeAmr(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v) => typeof v === 'string');
 }
+
+export const authenticateJwt: RequestHandler = async (req, _res, next) => {
+  try {
+    const token = parseBearerToken(req.header('authorization'));
+    if (!token) throw new UnauthorizedError('MISSING_BEARER_TOKEN');
+
+    const { claims } = await verifyCognitoJwt(token);
+
+    const sub = claims.sub;
+    if (typeof sub !== 'string' || !sub) throw new UnauthorizedError('INVALID_TOKEN');
+
+    const tokenUse = claims.token_use;
+    if (tokenUse !== 'access' && tokenUse !== 'id') throw new UnauthorizedError('INVALID_TOKEN_USE');
+
+    const email = typeof claims.email === 'string' ? claims.email : undefined;
+    const groups = normalizeGroups(claims['cognito:groups']);
+    const amr = normalizeAmr(claims.amr);
+
+    req.auth = {
+      sub,
+      email,
+      tokenUse,
+      groups,
+      amr,
+      rawClaims: claims
+    };
+
+    next();
+  } catch (err) {
+    next(err);
+  }
+};

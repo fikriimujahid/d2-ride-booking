@@ -26,6 +26,33 @@ variable "github_repo" {
 }
 
 # ============================================================================
+# Auth Module Variables
+# ============================================================================
+variable "cognito_tier" {
+  description = "Cognito User Pool tier: 'LITE' (cheaper) or 'PLUS' (advanced security features)"
+  type        = string
+  default     = "LITE"
+}
+
+variable "password_min_length" {
+  description = "Minimum password length (AWS minimum: 6, recommended: 12+)"
+  type        = number
+  default     = 12
+}
+
+variable "enable_mfa" {
+  description = "Enable Multi-Factor Authentication (requires authentication app like Google Authenticator)"
+  type        = bool
+  default     = true
+}
+
+variable "enable_advanced_security" {
+  description = "Enable Advanced Security Features (requires PLUS tier)"
+  type        = bool
+  default     = false
+}
+
+# ============================================================================
 # Networking Module Variables
 # ============================================================================
 variable "vpc_cidr" {

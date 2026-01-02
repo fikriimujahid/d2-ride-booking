@@ -21,3 +21,12 @@ output "user_pool_arn" {
   description = "The ARN (Amazon Resource Name) of the Cognito User Pool"
   value       = aws_cognito_user_pool.main.arn
 }
+
+output "user_pool_group_names" {
+  description = "Cognito User Pool Groups used as roles"
+  value = {
+    admin     = aws_cognito_user_group.admin.name
+    passenger = aws_cognito_user_group.passenger.name
+    driver    = aws_cognito_user_group.driver.name
+  }
+}

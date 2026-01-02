@@ -1,160 +1,145 @@
-// prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "mysql"
-  url      = env("DATABASE_URL")
 }
 
-model User {
-  id                String   @id @default(uuid())
-  email             String   @unique
-  phone_number      String   @unique
-  full_name         String
-  system_role       SystemRole @default(PASSENGER)
-  profile_photo_url String?
-  rating            Float    @default(5.0)
-  is_online         Boolean  @default(false)
-  created_at        DateTime @default(now())
-  updated_at        DateTime @updatedAt
-  
-  // Relations
-  rides_as_passenger Ride[]   @relation("PassengerRides")
-  rides_as_driver    Ride[]   @relation("DriverRides")
-  payments           Payment[]
-  vehicle            Vehicle?
-  roles              UserRole[]
-  
-  @@index([email])
-  @@index([system_role, is_online])
+model AdminUser {
+  id          String   @id @default(cuid())
+  cognitoSub  String   @unique
+  email       String   @unique
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  roleAssignments AdminUserRole[]
+  assignedRoleEvents AdminUserRole[] @relation("RoleAssignedBy")
+  revokedRoleEvents  AdminUserRole[] @relation("RoleRevokedBy")
+  grantedPermissionEvents AdminRolePermission[] @relation("PermissionGrantedBy")
+  revokedPermissionEvents AdminRolePermission[] @relation("PermissionRevokedBy")
+  auditEvents AdminRbacAuditEvent[] @relation("AuditActor")
+  targetedAuditEvents AdminRbacAuditEvent[] @relation("AuditTarget")
+
+  @@index([deletedAt])
 }
 
-enum SystemRole {
-  PASSENGER
-  DRIVER
-  ADMIN
+model AdminRole {
+  id          String   @id @default(cuid())
+  key         String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(128)
+  description String?  @db.VarChar(512)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  userAssignments AdminUserRole[]
+  permissions     AdminRolePermission[]
+  auditEvents     AdminRbacAuditEvent[]
+
+  @@index([deletedAt])
 }
 
-// Layer 2: Fine-Grained RBAC
-model Role {
-  id          String   @id @default(uuid())
-  name        String   @unique // e.g. SUPER_ADMIN, OPS_MANAGER
-  description String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+model AdminPermission {
+  id          String   @id @default(cuid())
+  key         String   @unique @db.VarChar(64)
+  name        String   @db.VarChar(128)
+  description String?  @db.VarChar(512)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
 
-  permissions RolePermission[]
-  users       UserRole[]
+  rolePermissions AdminRolePermission[]
+  auditEvents     AdminRbacAuditEvent[]
+
+  @@index([deletedAt])
 }
 
-model Permission {
-  id          String   @id @default(uuid())
-  key         String   @unique // e.g. MANAGE_RIDES
-  description String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+// Current assignment state for a given (adminUser, role).
+// Historical transitions should be captured in AdminRbacAuditEvent.
+model AdminUserRole {
+  id          String   @id @default(cuid())
+  adminUserId String
+  roleId      String
 
-  roles       RolePermission[]
+  assignedAt  DateTime @default(now())
+  assignedByAdminUserId String?
+
+  revokedAt   DateTime?
+  revokedByAdminUserId String?
+
+  deletedAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  role        AdminRole  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  assignedBy  AdminUser? @relation("RoleAssignedBy", fields: [assignedByAdminUserId], references: [id], onDelete: SetNull)
+  revokedBy   AdminUser? @relation("RoleRevokedBy", fields: [revokedByAdminUserId], references: [id], onDelete: SetNull)
+
+  @@unique([adminUserId, roleId])
+  @@index([adminUserId])
+  @@index([roleId])
+  @@index([revokedAt])
+  @@index([deletedAt])
 }
 
-model RolePermission {
-  role_id       String
-  permission_id String
-  
-  role          Role       @relation(fields: [role_id], references: [id], onDelete: Cascade)
-  permission    Permission @relation(fields: [permission_id], references: [id], onDelete: Cascade)
+// Current grant state for a given (role, permission).
+model AdminRolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
 
-  @@id([role_id, permission_id])
+  grantedAt    DateTime @default(now())
+  grantedByAdminUserId String?
+
+  revokedAt    DateTime?
+  revokedByAdminUserId String?
+
+  deletedAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role         AdminRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   AdminPermission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  grantedBy    AdminUser? @relation("PermissionGrantedBy", fields: [grantedByAdminUserId], references: [id], onDelete: SetNull)
+  revokedBy    AdminUser? @relation("PermissionRevokedBy", fields: [revokedByAdminUserId], references: [id], onDelete: SetNull)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@index([revokedAt])
+  @@index([deletedAt])
 }
 
-model UserRole {
-  user_id String
-  role_id String
-  
-  user    User @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  role    Role @relation(fields: [role_id], references: [id], onDelete: Cascade)
+// Append-only audit trail for admin RBAC changes.
+// Keep this database-agnostic by storing metadata as a JSON string.
+model AdminRbacAuditEvent {
+  id              String   @id @default(cuid())
+  action          String   @db.VarChar(64)
+  at              DateTime @default(now())
 
-  @@id([user_id, role_id])
-}
+  actorAdminUserId String?
+  targetAdminUserId String?
+  roleId           String?
+  permissionId     String?
 
-model Ride {
-  id                       String   @id @default(uuid())
-  passenger_id             String
-  driver_id                String?
-  status                   RideStatus @default(SEARCHING)
-  pickup_latitude          Float
-  pickup_longitude         Float
-  pickup_address           String
-  dropoff_latitude         Float
-  dropoff_longitude        Float
-  dropoff_address          String
-  estimated_distance_km    Float
-  estimated_duration_min   Int
-  estimated_fare           Float
-  actual_distance_km       Float?
-  actual_duration_min      Int?
-  final_fare               Float?
-  created_at               DateTime @default(now())
-  accepted_at              DateTime?
-  started_at               DateTime?
-  completed_at             DateTime?
-  cancelled_at             DateTime?
-  
-  // Relations
-  passenger                User     @relation("PassengerRides", fields: [passenger_id], references: [id])
-  driver                   User?    @relation("DriverRides", fields: [driver_id], references: [id])
-  payment                  Payment?
-  
-  @@index([passenger_id])
-  @@index([driver_id])
-  @@index([status])
-}
+  ip              String?  @db.VarChar(45)
+  userAgent       String?  @db.VarChar(512)
+  metadata        String?  @db.Text
 
-enum RideStatus {
-  SEARCHING
-  ACCEPTED
-  ARRIVED
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-}
+  actor           AdminUser? @relation("AuditActor", fields: [actorAdminUserId], references: [id], onDelete: SetNull)
+  targetAdminUser AdminUser? @relation("AuditTarget", fields: [targetAdminUserId], references: [id], onDelete: SetNull)
+  role            AdminRole? @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  permission      AdminPermission? @relation(fields: [permissionId], references: [id], onDelete: SetNull)
 
-model Payment {
-  id                      String   @id @default(uuid())
-  ride_id                 String   @unique
-  user_id                 String
-  amount                  Float
-  currency                String   @default("USD")
-  stripe_payment_intent_id String
-  status                  PaymentStatus
-  created_at              DateTime @default(now())
-  
-  // Relations
-  ride                    Ride     @relation(fields: [ride_id], references: [id])
-  user                    User     @relation(fields: [user_id], references: [id])
-  
-  @@index([user_id])
-  @@index([status])
-}
-
-enum PaymentStatus {
-  PENDING
-  PROCESSING
-  SUCCEEDED
-  FAILED
-  REFUNDED
-}
-
-model Vehicle {
-  id          String @id @default(uuid())
-  user_id     String @unique
-  make        String
-  model       String
-  year        Int
-  color       String
-  plate_number String @unique
-  
-  user        User   @relation(fields: [user_id], references: [id])
+  @@index([at])
+  @@index([action])
+  @@index([actorAdminUserId])
+  @@index([targetAdminUserId])
+  @@index([roleId])
+  @@index([permissionId])
 }

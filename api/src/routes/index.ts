@@ -1,19 +1,8 @@
 import { Router } from 'express';
-// import rideRoutes from './ride.routes';
-import passengerAuthRoutes from './auth/passenger.routes';
-import driverAuthRoutes from './auth/driver.routes';
-import adminAuthRoutes from './auth/admin.routes';
-import userRoutes from './user.routes';
+import { authRoutes } from './auth.routes.js';
+import { adminRoutes } from './admin.routes.js';
 
-const router = Router();
+export const routes = Router();
 
-// router.use('/rides', rideRoutes);
-router.use('/auth/passenger', passengerAuthRoutes);
-router.use('/auth/driver', driverAuthRoutes);
-router.use('/auth/admin', adminAuthRoutes);
-router.use('/users', userRoutes);
-// router.use('/drivers', driverRoutes);
-// router.use('/payments', paymentRoutes);
-// router.use('/admin', adminRoutes);
-
-export default router;
+routes.use('/auth', authRoutes);
+routes.use('/admin', adminRoutes);

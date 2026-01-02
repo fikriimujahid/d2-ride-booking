@@ -1,43 +1,90 @@
+import type { RequestHandler } from 'express';
+import { ApiError, UnauthorizedError } from '../models/error.model.js';
+import { prisma } from '../config/database.js';
 
-import { Request, Response, NextFunction } from 'express';
-import { UnauthorizedError, ForbiddenError } from '../utils/error.util';
-import { Permission, Permissions } from '../config/rbac.config';
+export function requireAdminPermission(requiredPermissions: string[]): RequestHandler {
+  return async (req, _res, next) => {
+    try {
+      if (!req.auth) return next(new UnauthorizedError('UNAUTHORIZED'));
 
-type UserPayload = NonNullable<Request['user']>;
+      const isAdmin = req.auth.groups.includes('Admin');
+      if (!isAdmin) {
+        return next(
+          new ApiError({
+            status: 403,
+            code: 'AUTH_FORBIDDEN',
+            message: 'You do not have access to this resource.',
+            details: { required_group: 'Admin' }
+          })
+        );
+      }
 
-export const requireRole = (allowedRoles: string[]) => {
-    return (req: Request, _res: Response, next: NextFunction) => {
-        const user = req.user as UserPayload | undefined;
-
-        if (!user) {
-            return next(new UnauthorizedError('User not authenticated'));
+      const adminSub = req.auth.sub;
+      const admin = await prisma.adminUser.findUnique({
+        where: { cognitoSub: adminSub },
+        select: {
+          id: true,
+          deletedAt: true,
+          roleAssignments: {
+            where: { deletedAt: null, revokedAt: null },
+            select: {
+              role: {
+                select: {
+                  deletedAt: true,
+                  permissions: {
+                    where: { deletedAt: null, revokedAt: null },
+                    select: {
+                      permission: { select: { key: true, deletedAt: true } }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
+      });
 
-        // Check System Role (Layer 1) or Fine-Grained Role (Layer 2)
-        const hasRole = allowedRoles.includes(user.system_role) ||
-            user.roles.some(r => allowedRoles.includes(r));
+      if (!admin || admin.deletedAt) {
+        return next(
+          new ApiError({
+            status: 403,
+            code: 'RBAC_INSUFFICIENT_ROLE',
+            message: 'You do not have the required role to perform this action.',
+            details: {
+              required_permissions: requiredPermissions
+            }
+          })
+        );
+      }
 
-        if (!hasRole) {
-            return next(new ForbiddenError('Insufficient permissions'));
+      const permissionKeys = new Set<string>();
+      for (const assignment of admin.roleAssignments) {
+        const role = assignment.role;
+        if (role.deletedAt) continue;
+        for (const rp of role.permissions) {
+          if (!rp.permission.deletedAt) permissionKeys.add(rp.permission.key);
         }
+      }
 
-        next();
-    };
-};
+      const ok = requiredPermissions.every((p) => permissionKeys.has(p));
+      if (!ok) {
+        const missing = requiredPermissions.filter((p) => !permissionKeys.has(p));
+        return next(
+          new ApiError({
+            status: 403,
+            code: 'RBAC_INSUFFICIENT_ROLE',
+            message: 'You do not have the required role to perform this action.',
+            details: {
+              required_permissions: requiredPermissions,
+              missing_permissions: missing
+            }
+          })
+        );
+      }
 
-export const requirePermission = (requiredPermission: Permission) => {
-    return (req: Request, _res: Response, next: NextFunction) => {
-        const user = req.user as UserPayload | undefined;
-
-        if (!user) {
-            return next(new UnauthorizedError('User not authenticated'));
-        }
-
-        // Check for exact permission or ALL_ACCESS
-        if (user.permissions.includes(Permissions.ALL_ACCESS) || user.permissions.includes(requiredPermission)) {
-            return next();
-        }
-
-        return next(new ForbiddenError(`Missing permission: ${requiredPermission} `));
-    };
-};
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}

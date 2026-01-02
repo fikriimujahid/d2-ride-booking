@@ -116,7 +116,37 @@ resource "aws_cognito_user_pool" "main" {
   deletion_protection = var.environment == "prod" ? "ACTIVE" : "INACTIVE"
 
   # Tags help with cost allocation and inventory.
-  tags = local.common_tags
+  # Merge standard tags with caller-provided tags (caller wins on conflicts).
+  tags = merge(local.common_tags, var.tags)
+}
+
+
+# ============================================================================
+# RESOURCE: Cognito User Pool Groups (Roles)
+# ----------------------------------------------------------------------------
+resource "aws_cognito_user_group" "admin" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  name         = "Admin"
+  description  = "Administrative users"
+
+  # Lower number = higher precedence
+  precedence = 1
+}
+
+resource "aws_cognito_user_group" "passenger" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  name         = "Passenger"
+  description  = "Passenger users"
+
+  precedence = 2
+}
+
+resource "aws_cognito_user_group" "driver" {
+  user_pool_id = aws_cognito_user_pool.main.id
+  name         = "Driver"
+  description  = "Driver users"
+
+  precedence = 3
 }
 
 
