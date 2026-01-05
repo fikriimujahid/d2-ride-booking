@@ -1,30 +1,35 @@
-import { Car, Shield, Lock, Mail, Eye, EyeOff, Smartphone } from "lucide-react";
-import { useAdminLoginFlow } from "./useAdminLoginFlow.tsx";
+import { Car } from "lucide-react";
+import { useState, type FormEvent } from "react";
+import type { ApiError } from "../../api/types";
+import { useAuth } from "../../auth/AuthContext";
 import { CredentialsStep } from "./CredentialsStep.tsx";
-import { MfaStep } from "./MfaStep.tsx";
 
-interface LoginScreenProps {
-  onLogin: (opts?: { mfaEnrollmentRequired?: boolean }) => void;
-}
+export function LoginScreen() {
+  const { loginWithPassword } = useAuth();
 
-export function LoginScreen({ onLogin }: LoginScreenProps) {
-  const {
-    step,
-    setStep,
-    showPassword,
-    setShowPassword,
-    email,
-    setEmail,
-    password,
-    setPassword,
-    mfaCode,
-    isSubmitting,
-    error,
-    handleCredentialsSubmit,
-    handleMfaSubmit,
-    handleMfaInput,
-    handleMfaKeyDown,
-  } = useAdminLoginFlow(onLogin);
+  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCredentialsSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!email || !password) return;
+
+    try {
+      setIsSubmitting(true);
+      await loginWithPassword(email, password);
+      // Navigation is handled by route guards based on explicit auth state.
+    } catch (e) {
+      const err = e as ApiError;
+      // SECURITY: generic, non-sensitive message.
+      setError(err?.message || "Sign-in failed. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
@@ -40,29 +45,17 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
 
         {/* Login Form */}
         <div className="bg-white rounded-2xl shadow-xl border border-gray-200 p-8">
-          {step === "credentials" ? (
-            <CredentialsStep
-              error={error}
-              email={email}
-              password={password}
-              showPassword={showPassword}
-              isSubmitting={isSubmitting}
-              onEmailChange={setEmail}
-              onPasswordChange={setPassword}
-              onToggleShowPassword={() => setShowPassword(!showPassword)}
-              onSubmit={handleCredentialsSubmit}
-            />
-          ) : (
-            <MfaStep
-              error={error}
-              mfaCode={mfaCode}
-              isSubmitting={isSubmitting}
-              onSubmit={handleMfaSubmit}
-              onBackToLogin={() => setStep("credentials")}
-              onMfaInput={handleMfaInput}
-              onMfaKeyDown={handleMfaKeyDown}
-            />
-          )}
+          <CredentialsStep
+            error={error}
+            email={email}
+            password={password}
+            showPassword={showPassword}
+            isSubmitting={isSubmitting}
+            onEmailChange={setEmail}
+            onPasswordChange={setPassword}
+            onToggleShowPassword={() => setShowPassword(!showPassword)}
+            onSubmit={handleCredentialsSubmit}
+          />
         </div>
 
         {/* Security Notice */}

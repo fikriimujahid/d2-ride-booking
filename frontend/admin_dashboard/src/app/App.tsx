@@ -1,182 +1,185 @@
 import React, { useEffect } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
+
 import { LoginScreen } from "./components/auth/LoginScreen";
-import { useAuthState } from "./auth/useAuthState.tsx";
+import { MfaEnrollmentFlow } from "./components/auth/MfaEnrollmentFlow";
+import { MfaSetupScreen } from "./components/auth/MfaSetupScreen";
+import { MfaVerifyScreen } from "./components/auth/MfaVerifyScreen";
+import { ForbiddenPage } from "./components/auth/ForbiddenPage";
+import { AdminShell } from "./components/layout/AdminShell";
+
 import { onAuthErrorEvent } from "./routing/authEvents";
-import { useNavigation } from "./routing/useNavigation.tsx";
-import { routes } from "./routing/routes.tsx";
+import { authStore } from "./auth/authStore";
+import { AuthProvider, useAuth } from "./auth/AuthContext";
 
-/**
- * Router Component
- *
- * Handles:
- * 1) URL path matching
- * 2) Auth guard (ADMIN-only)
- * 3) MFA guard (route-level)
- * 4) Centralized API error redirects (MFA_REQUIRED, RBAC, etc.)
- * 5) Browser back/forward navigation
- */
-function Router() {
-  const { navigate, pathname, searchParams } = useNavigation();
-  const { isAuthenticated, mfaEnrollmentRequired, logout, setMfaEnrollmentRequired } =
-    useAuthState();
+function FullPageLoading() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <p className="text-sm text-gray-600">Loading…</p>
+    </div>
+  );
+}
 
-  // Centralized auth decisions based on API error codes.
-  // The backend is the source of truth for MFA and RBAC.
+function AuthErrorListener() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+
   useEffect(() => {
     return onAuthErrorEvent(({ code }) => {
-      // Explicit control flow is preferred here on purpose.
-      if (code === "AUTH_UNAUTHENTICATED") {
+      // SECURITY: backend is the source of truth.
+      // 401 => logout + login
+      if (code === "AUTH_UNAUTHENTICATED" || code === "AUTH_TOKEN_EXPIRED") {
         logout();
-        navigate("/login");
+        navigate("/login", { replace: true });
+        return;
+      }
+
+      // 403 => either MFA flow or forbidden or login (fail closed)
+      if (code === "MFA_NOT_ENROLLED" || code === "MFA_REQUIRED") {
+        authStore.setMfaEnrollmentRequired(true);
+        navigate("/mfa/setup", { replace: true });
         return;
       }
 
       if (code === "RBAC_INSUFFICIENT_ROLE") {
-        // User is signed in, but not allowed to perform an admin action.
-        navigate("/forbidden");
+        navigate("/forbidden", { replace: true });
         return;
       }
 
-      if (code === "MFA_NOT_ENROLLED") {
-        // Enrollment required -> go directly to setup.
-        setMfaEnrollmentRequired(true);
-        navigate("/mfa/setup");
-        return;
-      }
-
-      if (code === "MFA_REQUIRED") {
-        // Requirement from spec: MFA_REQUIRED -> redirect to MFA setup screen.
-        setMfaEnrollmentRequired(true);
-        navigate("/mfa/setup");
+      if (code === "AUTH_FORBIDDEN") {
+        logout();
+        navigate("/login", { replace: true });
         return;
       }
     });
-  }, [navigate, logout, setMfaEnrollmentRequired]);
+  }, [logout, navigate]);
 
-  // Route matching by pathname only.
-  const matchedRoute = routes.find((r) => r.path === pathname) || null;
+  return null;
+}
 
-  // 404 fallback: keep it simple by sending users to /login.
-  if (!matchedRoute) {
-    navigate("/login");
-    return null;
-  }
+function LoginRoute() {
+  const { status, isBootstrapping } = useAuth();
 
-  /**
-   * Public route behavior
-   *
-   * If a signed-in user hits /login (or /), send them to the correct place:
-   * - MFA setup (if enrollment is required)
-   * - Admin app (if MFA is already satisfied)
-   */
-  if (
-    !matchedRoute.requiresAuth &&
-    isAuthenticated &&
-    (pathname === "/" || pathname === "/login")
-  ) {
-    navigate(mfaEnrollmentRequired ? "/mfa/setup" : "/app");
-    return null;
-  }
+  if (isBootstrapping) return <FullPageLoading />;
+  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
+  if (status === "MFA_VERIFICATION_REQUIRED") return <Navigate to="/mfa/verify" replace />;
+  return <LoginScreen />;
+}
 
-  /**
-   * Auth guard
-   *
-   * If the route requires auth and the user is not authenticated,
-   * show the login screen.
-   */
-  if (matchedRoute.requiresAuth && !isAuthenticated) {
+function MfaSetupRoute() {
+  const { status, isBootstrapping, logout } = useAuth();
+
+  if (isBootstrapping) return <FullPageLoading />;
+
+  // Login-time setup (no tokens)
+  if (status === "MFA_SETUP_REQUIRED") return <MfaSetupScreen />;
+
+  // Authenticated enrollment flow (tokens exist but backend requires enrolling)
+  if (status === "AUTHENTICATED" && authStore.isMfaEnrollmentRequired()) {
     return (
-      <LoginScreen
-        onLogin={(opts) => {
-          if (opts?.mfaEnrollmentRequired) {
-            navigate("/mfa/setup");
-          } else {
-            navigate("/app");
-          }
+      <MfaEnrollmentFlow
+        onDone={() => {
+          logout();
         }}
       />
     );
   }
 
-  /**
-   * MFA guard
-   *
-   * Keep routing predictable:
-   * - Any route marked requiresMfa will redirect to setup if enrollment is needed.
-   * - The API can still force /mfa/setup using MFA_REQUIRED.
-   */
-  if (matchedRoute.requiresMfa && mfaEnrollmentRequired) {
-    navigate("/mfa/setup");
-    return null;
-  }
+  if (status === "MFA_VERIFICATION_REQUIRED") return <Navigate to="/mfa/verify" replace />;
+  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  return <Navigate to="/login" replace />;
+}
 
-  const Component = matchedRoute.component;
+function MfaVerifyRoute() {
+  const { status, isBootstrapping } = useAuth();
+  if (isBootstrapping) return <FullPageLoading />;
+  if (status === "MFA_VERIFICATION_REQUIRED") return <MfaVerifyScreen />;
+  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
+  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  return <Navigate to="/login" replace />;
+}
 
-  // Route props are explicit; no magic contexts.
-  // If a case cannot be simplified without changing behavior, we leave it explicit.
-  const renderByPath: Record<string, () => React.ReactElement | null> = {
-    "/mfa/setup": () => (
-      <Component
-        onDone={() => {
-          // Enrollment flow logs out; user signs in again.
-          navigate("/login");
-        }}
-      />
-    ),
-    "/forbidden": () => (
-      <Component
-        onLogout={() => {
-          logout();
-          navigate("/login");
-        }}
-      />
-    ),
-    "/app": () => {
-      const module = searchParams.get("module") || "dashboard";
-      return (
-        <Component
-          module={module}
-          onModuleChange={(nextModule: string) =>
-            navigate(`/app?module=${encodeURIComponent(nextModule)}`)
+function RequireAuthenticated(props: { children: React.ReactElement }) {
+  const { status, isBootstrapping } = useAuth();
+
+  if (isBootstrapping) return <FullPageLoading />;
+  if (status === "AUTHENTICATED") return props.children;
+  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
+  if (status === "MFA_VERIFICATION_REQUIRED") return <Navigate to="/mfa/verify" replace />;
+  return <Navigate to="/login" replace />;
+}
+
+function AdminShellRoute() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { logout } = useAuth();
+
+  const module = searchParams.get("module") || "dashboard";
+  return (
+    <AdminShell
+      module={module}
+      onModuleChange={(nextModule: string) =>
+        navigate(`/app?module=${encodeURIComponent(nextModule)}`)
+      }
+      onLogout={() => {
+        logout();
+        navigate("/login", { replace: true });
+      }}
+    />
+  );
+}
+
+function ForbiddenRoute() {
+  const navigate = useNavigate();
+  const { logout } = useAuth();
+  return (
+    <ForbiddenPage
+      onLogout={() => {
+        logout();
+        navigate("/login", { replace: true });
+      }}
+    />
+  );
+}
+
+function AppRoutes() {
+  return (
+    <>
+      <AuthErrorListener />
+      <Routes>
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<LoginRoute />} />
+        <Route path="/mfa/setup" element={<MfaSetupRoute />} />
+        <Route path="/mfa/verify" element={<MfaVerifyRoute />} />
+        <Route path="/forbidden" element={<ForbiddenRoute />} />
+        <Route
+          path="/app"
+          element={
+            <RequireAuthenticated>
+              <AdminShellRoute />
+            </RequireAuthenticated>
           }
-          onLogout={() => {
-            logout();
-            navigate("/login");
-          }}
         />
-      );
-    },
-    "/": () => (
-      <Component
-        onLogin={(opts?: { mfaEnrollmentRequired?: boolean }) => {
-          if (opts?.mfaEnrollmentRequired) {
-            navigate("/mfa/setup");
-          } else {
-            navigate("/app");
-          }
-        }}
-      />
-    ),
-    "/login": () => (
-      <Component
-        onLogin={(opts?: { mfaEnrollmentRequired?: boolean }) => {
-          if (opts?.mfaEnrollmentRequired) {
-            navigate("/mfa/setup");
-          } else {
-            navigate("/app");
-          }
-        }}
-      />
-    ),
-  };
-
-  const render = renderByPath[pathname];
-  if (render) return render();
-
-  // Default render (should be unreachable because routes are explicit).
-  return <Component />;
+        <Route path="*" element={<Navigate to="/login" replace />} />
+      </Routes>
+    </>
+  );
 }
 
 export default function App() {
-  return <Router />;
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
+  );
 }

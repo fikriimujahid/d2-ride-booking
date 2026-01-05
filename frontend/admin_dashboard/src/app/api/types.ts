@@ -41,17 +41,39 @@ export type AuthUser = {
 
 export type AdminLoginResult =
   | {
+      // Backend-supported state: MFA_SETUP_REQUIRED
+      // SECURITY: the client receives only an opaque `session` (sealed by backend), never Cognito session details.
       mfa_required: true;
+      status: "MFA_SETUP_REQUIRED";
       email: string;
       session: string;
-      challenge_name: string;
+      qr_code_uri: string;
+      secret: string;
+
+      // Back-compat fields (do not use for UI decisions)
+      challenge_name?: string;
+    }
+  | {
+      // Backend-supported state: MFA_VERIFICATION_REQUIRED
+      // SECURITY: `session` is an opaque backend token; UI must never display it.
+      mfa_required: true;
+      status: "MFA_VERIFICATION_REQUIRED";
+      email: string;
+
+      // Some backend responses require re-login and may omit session.
+      // Secure default: frontend should fail closed and send user back to password login.
+      session?: string;
+
+      // Back-compat field (do not use for UI decisions)
+      challenge_name?: string;
     }
   | {
       access_token: string;
       id_token?: string;
       refresh_token?: string;
       token_type?: string;
-      mfa_hint?: 'MFA_NOT_PRESENT';
+      // Hint only for UX routing; backend remains the source of truth.
+      mfa_hint?: "MFA_NOT_PRESENT";
       user: AuthUser;
     };
 

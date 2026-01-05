@@ -22,28 +22,31 @@ function safeParse(json: string | null): AuthState | null {
 
 export const authStore = {
   get(): AuthState | null {
-    return safeParse(localStorage.getItem(STORAGE_KEY));
+    // SECURITY: use sessionStorage to reduce the blast radius of token persistence.
+    // We still do NOT treat mere presence of tokens as "authenticated"; the backend remains the source of truth.
+    return safeParse(sessionStorage.getItem(STORAGE_KEY));
   },
 
   set(state: AuthState) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   },
 
   clear() {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(MFA_ENROLLMENT_REQUIRED_KEY);
+    sessionStorage.removeItem(STORAGE_KEY);
+    sessionStorage.removeItem(MFA_ENROLLMENT_REQUIRED_KEY);
   },
 
   setMfaEnrollmentRequired(required: boolean) {
+    // SECURITY: this flag is a UI hint only. MFA enforcement is still done by the backend.
     if (required) {
-      localStorage.setItem(MFA_ENROLLMENT_REQUIRED_KEY, "true");
+      sessionStorage.setItem(MFA_ENROLLMENT_REQUIRED_KEY, "true");
     } else {
-      localStorage.removeItem(MFA_ENROLLMENT_REQUIRED_KEY);
+      sessionStorage.removeItem(MFA_ENROLLMENT_REQUIRED_KEY);
     }
   },
 
   isMfaEnrollmentRequired(): boolean {
-    return localStorage.getItem(MFA_ENROLLMENT_REQUIRED_KEY) === "true";
+    return sessionStorage.getItem(MFA_ENROLLMENT_REQUIRED_KEY) === "true";
   },
 
   getAccessToken(): string | null {

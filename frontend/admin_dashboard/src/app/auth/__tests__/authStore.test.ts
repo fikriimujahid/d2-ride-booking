@@ -3,7 +3,7 @@ import { authStore } from "../authStore";
 
 describe("authStore (unit)", () => {
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("returns null when empty", () => {
@@ -76,7 +76,7 @@ describe("authStore (unit)", () => {
 
   it("handles corrupted storage safely", () => {
     // Corrupted JSON should not crash the app.
-    localStorage.setItem("rideadmin.auth", "{not-json");
+    sessionStorage.setItem("rideadmin.auth", "{not-json");
     expect(authStore.get()).toBeNull();
   });
 });

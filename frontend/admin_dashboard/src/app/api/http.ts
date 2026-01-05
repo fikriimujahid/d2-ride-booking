@@ -39,12 +39,16 @@ export async function apiRequest<T>(
 
   if (!res.ok) {
     const err = body as ApiErrorResponse | undefined;
-    const code =
+    let code =
       (err && typeof err === "object" && "error" in err && (err as any).error?.code) ||
       undefined;
     const message =
       (err && typeof err === "object" && "error" in err && typeof (err as any).error?.message === "string" && (err as any).error.message) ||
       `Request failed (${res.status})`;
+
+    // SECURITY: If backend did not return a structured auth code, infer a safe default.
+    if (!code && res.status === 401) code = "AUTH_UNAUTHENTICATED";
+    if (!code && res.status === 403) code = "AUTH_FORBIDDEN";
 
     // Centralized auth-related decision trigger.
     // We only emit redirects for requests that explicitly declare `auth: true`.
@@ -52,6 +56,8 @@ export async function apiRequest<T>(
     if (init.auth && typeof code === "string") {
       if (
         code === "AUTH_UNAUTHENTICATED" ||
+        code === "AUTH_TOKEN_EXPIRED" ||
+        code === "AUTH_FORBIDDEN" ||
         code === "MFA_REQUIRED" ||
         code === "MFA_NOT_ENROLLED" ||
         code === "RBAC_INSUFFICIENT_ROLE"

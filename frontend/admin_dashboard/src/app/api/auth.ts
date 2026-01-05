@@ -12,14 +12,13 @@ export async function adminVerifyMfa(
   email: string,
   session: string,
   code: string
-): Promise<Extract<AdminLoginResult, { access_token: string }>> {
-  return apiRequest<Extract<AdminLoginResult, { access_token: string }>>(
-    "/auth/admin/mfa/verify",
-    {
+): Promise<AdminLoginResult> {
+  // SECURITY: backend may return AUTHENTICATED (tokens) or another MFA step.
+  // UI should always follow backend state, not local assumptions.
+  return apiRequest<AdminLoginResult>("/auth/admin/mfa/verify", {
     method: "POST",
     body: JSON.stringify({ email, session, code }),
-    }
-  );
+  });
 }
 
 export async function adminRefresh(refresh_token: string, email: string) {

@@ -38,6 +38,7 @@ describe("admin auth API (unit)", () => {
 
     (apiRequest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       mfa_required: true,
+      status: "MFA_VERIFICATION_REQUIRED",
       email: "admin@example.com",
       session: "sess",
       challenge_name: "SOFTWARE_TOKEN_MFA",
