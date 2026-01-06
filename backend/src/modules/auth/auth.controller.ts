@@ -47,6 +47,6 @@ export class AuthController {
   @ApiOkResponse({ description: 'JWT claims from access token' })
   @ApiUnauthorizedResponse({ description: 'Missing/invalid access token' })
   whoami(@Req() req: any) {
-    return { user: req.user };
+    return { dbUserId: req.dbUserId, user: req.user };
   }
 }

@@ -4,7 +4,10 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+
+import { PrismaService } from '../../shared/prisma/prisma.service';
 
 function getBearerToken(authHeader: string | undefined): string | null {
   if (!authHeader) return null;
@@ -16,6 +19,8 @@ function getBearerToken(authHeader: string | undefined): string | null {
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
   private jwks = createRemoteJWKSet(new URL(this.jwksUrl));
+
+  constructor(private readonly prisma: PrismaService) {}
 
   private get region() {
     return process.env.AWS_REGION;
@@ -72,6 +77,73 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     request.user = payload;
+
+    const dbUserId = await this.syncUser(payload);
+    request.dbUserId = dbUserId;
     return true;
+  }
+
+  private async syncUser(payload: JWTPayload): Promise<string> {
+    const cognitoSub = payload.sub;
+    if (!cognitoSub) {
+      throw new UnauthorizedException('Token missing subject');
+    }
+
+    const emailClaim = payload.email;
+    const usernameClaim = payload['username'];
+    const cognitoUsernameClaim = payload['cognito:username'];
+
+    const email =
+      (typeof emailClaim === 'string' && emailClaim) ||
+      (typeof usernameClaim === 'string' && usernameClaim) ||
+      (typeof cognitoUsernameClaim === 'string' && cognitoUsernameClaim) ||
+      cognitoSub;
+
+    const nameClaim = payload['name'];
+    const givenName = payload['given_name'];
+    const familyName = payload['family_name'];
+    const name =
+      (typeof nameClaim === 'string' && nameClaim) ||
+      (typeof givenName === 'string' && typeof familyName === 'string'
+        ? `${givenName} ${familyName}`.trim()
+        : undefined) ||
+      (typeof givenName === 'string' && givenName) ||
+      email;
+
+    try {
+      const user = await this.prisma.user.upsert({
+        where: { cognitoSub },
+        update: {
+          email,
+          name,
+          cognitoSub,
+        },
+        create: {
+          email,
+          name,
+          cognitoSub,
+        },
+      });
+
+      return user.id;
+    } catch (err: unknown) {
+      // Handle the case where the user already exists by email, but doesn't yet have cognitoSub set.
+      if (err instanceof Prisma.PrismaClientKnownRequestError) {
+        if (err.code === 'P2002') {
+          const existingByEmail = await this.prisma.user.findUnique({ where: { email } });
+          if (existingByEmail) {
+            const updated = await this.prisma.user.update({
+              where: { email },
+              data: {
+                cognitoSub,
+                name,
+              },
+            });
+            return updated.id;
+          }
+        }
+      }
+      throw err;
+    }
   }
 }
