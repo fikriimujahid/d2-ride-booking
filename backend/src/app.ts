@@ -1,11 +1,16 @@
 import express from 'express';
 
 import { env } from './config/env';
+import { authenticateJwtOptional } from './modules/auth/auth.middleware';
+import { authRoutes } from './modules/auth/auth.routes';
 
 export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+
+  // Auth context (optional): attaches req.auth when a valid JWT is provided.
+  app.use(authenticateJwtOptional());
 
   app.get('/health', (_req, res) => {
     res.status(200).json({
@@ -13,6 +18,8 @@ export function createApp() {
       env: env.NODE_ENV,
     });
   });
+
+  app.use('/auth', authRoutes());
 
   app.use((req, res) => {
     res.status(404).json({

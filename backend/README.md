@@ -26,6 +26,27 @@ npm run dev
 Health check:
 - `GET http://localhost:3000/health`
 
+## Auth (JWT)
+
+The API supports JWT verification via `Authorization: Bearer <token>`.
+
+Roles:
+- `admin`
+- `driver`
+- `passenger`
+
+To verify auth end-to-end (non-business test endpoint):
+- `GET http://localhost:3000/auth/whoami` (requires a valid token)
+
+Required token claims:
+- `sub` (user id)
+- `role` (one of the roles above)
+
+Env:
+- `JWT_SECRET` (required to verify JWTs)
+- `JWT_ISSUER` (optional)
+- `JWT_AUDIENCE` (optional)
+
 ## Database
 
 Migrations are plain `.sql` files in `db/migrations`, applied in filename order.
@@ -43,3 +64,13 @@ If you see `The server does not support SSL connections`, set `DB_SSL=false` in 
 - `npm run lint` - eslint
 - `npm run format` - prettier
 - `npm run typecheck` - TypeScript typecheck
+
+## E2E auth test
+
+Runs a self-contained script that boots the API on a random port, then checks:
+- `/health` returns 200
+- `/auth/whoami` returns 401 without a token
+- `/auth/whoami` returns 200 with a valid JWT
+
+Command:
+- `npm run test:e2e:auth`

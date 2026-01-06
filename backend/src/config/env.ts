@@ -22,6 +22,11 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().min(1).optional(),
   DB_SSL: booleanFromEnv.optional().default(false),
+
+  // Auth
+  JWT_SECRET: z.string().min(16).optional(),
+  JWT_ISSUER: z.string().min(1).optional(),
+  JWT_AUDIENCE: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
