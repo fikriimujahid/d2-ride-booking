@@ -1,60 +1,43 @@
-import 'reflect-metadata';
-
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory, HttpAdapterHost } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 
-import { AppModule } from './app.module';
-import { AllExceptionsFilter } from './shared/filters/all-exceptions.filter';
-import { getCorsOptions } from './config/cors.config';
-
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    bufferLogs: true,
-  });
+  const app = await NestFactory.create(AppModule);
 
+  // Security: Helmet
   app.use(helmet());
-  app.enableCors(getCorsOptions());
 
+  // Security: CORS
+  app.enableCors();
+
+  // Global Validation Pipe
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
-      forbidNonWhitelisted: true,
       transform: true,
-      transformOptions: {
-        enableImplicitConversion: false,
-      },
+      forbidNonWhitelisted: true,
     }),
   );
 
-  const httpAdapterHost = app.get(HttpAdapterHost);
-  app.useGlobalFilters(new AllExceptionsFilter(httpAdapterHost));
-
-  const swaggerConfig = new DocumentBuilder()
+  // Swagger Configuration
+  const config = new DocumentBuilder()
     .setTitle('D2 Ride Booking API')
-    .setDescription('Backend API (skeleton)')
-    .setVersion('0.1.0')
-    .addBearerAuth(
-      {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-      },
-      'bearer',
-    )
+    .setDescription('The D2 Ride Booking API description')
+    .setVersion('1.0')
+    .addTag('d2')
     .build();
-
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api', app, document, {
-    jsonDocumentUrl: 'api-json',
-    swaggerOptions: {
-      persistAuthorization: true,
-    },
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document);
+  
+  // JSON endpoint for Swagger
+  app.getHttpAdapter().get('/api-json', (req, res) => {
+    res.json(document);
   });
 
-  const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port);
+  await app.listen(3000);
+  console.log(`Application is running on: ${await app.getUrl()}`);
 }
-
 bootstrap();

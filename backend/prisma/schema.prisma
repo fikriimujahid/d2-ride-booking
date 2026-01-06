@@ -1,3 +1,6 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,47 +10,57 @@ datasource db {
 }
 
 model User {
-  id         String     @id @default(uuid()) @db.Uuid
-  email      String     @unique
-  name       String
-  cognitoSub String?    @unique
+  id        String     @id @default(uuid())
+  email     String     @unique
+  name      String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  userRoles UserRole[]
 
-  roles      UserRole[]
+  @@map("users")
 }
 
 model Role {
-  id          String           @id @default(uuid()) @db.Uuid
-  name        String           @unique
+  id              String           @id @default(uuid())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
 
-  users       UserRole[]
-  permissions RolePermission[]
+  @@map("roles")
 }
 
 model Permission {
-  id    String           @id @default(uuid()) @db.Uuid
-  name  String           @unique
+  id              String           @id @default(uuid())
+  name            String           @unique
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  rolePermissions RolePermission[]
 
-  roles RolePermission[]
+  @@map("permissions")
 }
 
+// Join table for User <-> Role (Many-to-Many)
 model UserRole {
-  userId String @db.Uuid
-  roleId String @db.Uuid
-
+  userId String
+  roleId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
 
   @@id([userId, roleId])
-  @@index([roleId])
+  @@map("user_roles")
 }
 
+// Join table for Role <-> Permission (Many-to-Many)
 model RolePermission {
-  roleId       String     @db.Uuid
-  permissionId String     @db.Uuid
-
+  roleId       String
+  permissionId String
   role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
   permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@id([roleId, permissionId])
-  @@index([permissionId])
+  @@map("role_permissions")
 }

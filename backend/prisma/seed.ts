@@ -1,160 +1,139 @@
-import 'dotenv/config';
-
-import {
-  AdminCreateUserCommand,
-  AdminGetUserCommand,
-  AdminSetUserPasswordCommand,
-  CognitoIdentityProviderClient,
-} from '@aws-sdk/client-cognito-identity-provider';
 import { PrismaClient } from '@prisma/client';
+import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 
-const prisma = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
-});
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const roles = [
-    'SUPER_ADMIN',
-    'DRIVER',
-    'PASSENGER',
-    'OPERATIONS_MANAGER',
-  ] as const;
+  console.log('Seeding database...');
 
+  // 1. Create Permissions
   const permissions = [
     'rides.create',
-    'rides.read',
+    'rides.view',
     'rides.update',
     'rides.delete',
-    'drivers.manage',
-    'passengers.manage',
-  ] as const;
+    'drivers.create',
+    'drivers.view',
+    'drivers.update',
+    'drivers.delete',
+    'passengers.create',
+    'passengers.view',
+    'passengers.update',
+    'passengers.delete',
+  ];
 
-  for (const name of roles) {
-    await prisma.role.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-    });
-  }
-
-  for (const name of permissions) {
+  for (const perm of permissions) {
     await prisma.permission.upsert({
-      where: { name },
+      where: { name: perm },
       update: {},
-      create: { name },
+      create: {
+        name: perm,
+        description: `Permission for ${perm}`,
+      },
     });
   }
 
-  await seedSuperAdminUser();
-}
+  // 2. Create Roles
+  const roles = [
+    { name: 'SUPER_ADMIN', description: 'Super Administrator with all permissions' },
+    { name: 'DRIVER', description: 'Driver role' },
+    { name: 'PASSENGER', description: 'Passenger role' },
+    { name: 'OPERATIONS_MANAGER', description: 'Operations Manager role' },
+  ];
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value || value.trim().length === 0) {
-    throw new Error(`Missing required env var: ${name}`);
-  }
-  return value;
-}
-
-function getAttr(attrs: Array<{ Name?: string; Value?: string }> | undefined, key: string) {
-  return attrs?.find((a) => a.Name === key)?.Value;
-}
-
-async function seedSuperAdminUser() {
-  const email = process.env.SUPER_ADMIN_EMAIL?.trim();
-  if (!email) {
-    // Seed stays idempotent and safe for environments that don't want a bootstrap user.
-    return;
+  const createdRoles = [];
+  for (const roleData of roles) {
+    const role = await prisma.role.upsert({
+      where: { name: roleData.name },
+      update: {},
+      create: roleData,
+    });
+    createdRoles.push(role);
   }
 
-  const name = (process.env.SUPER_ADMIN_NAME ?? 'Super Admin').trim();
-  const password = process.env.SUPER_ADMIN_PASSWORD?.trim();
-
-  const region = requireEnv('AWS_REGION');
-  const userPoolId = requireEnv('COGNITO_USER_POOL_ID');
-
-  const cognito = new CognitoIdentityProviderClient({ region });
-
-  // 1) Ensure user exists in Cognito and capture sub
-  let cognitoSub: string | undefined;
-  try {
-    const existing = await cognito.send(
-      new AdminGetUserCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-      }),
-    );
-    cognitoSub = getAttr(existing.UserAttributes, 'sub');
-  } catch (e: any) {
-    // If user doesn't exist, create it.
-    const created = await cognito.send(
-      new AdminCreateUserCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-        MessageAction: 'SUPPRESS',
-        UserAttributes: [
-          { Name: 'email', Value: email },
-          { Name: 'email_verified', Value: 'true' },
-          { Name: 'name', Value: name },
-        ],
-      }),
-    );
-    cognitoSub = getAttr(created.User?.Attributes, 'sub');
+  // 3. Assign Permissions to Roles (Example logic)
+  // Give SUPER_ADMIN all permissions
+  const superAdminRole = createdRoles.find((r) => r.name === 'SUPER_ADMIN');
+  if (superAdminRole) {
+    const allPermissions = await prisma.permission.findMany();
+    for (const perm of allPermissions) {
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: superAdminRole.id,
+            permissionId: perm.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: superAdminRole.id,
+          permissionId: perm.id,
+        },
+      });
+    }
   }
 
-  if (password) {
-    await cognito.send(
-      new AdminSetUserPasswordCommand({
-        UserPoolId: userPoolId,
-        Username: email,
-        Password: password,
-        Permanent: true,
-      }),
-    );
-  }
-
-  // 2) Upsert user in DB
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {
-      name,
-      cognitoSub: cognitoSub ?? undefined,
-    },
-    create: {
-      email,
-      name,
-      cognitoSub: cognitoSub ?? undefined,
-    },
-  });
-
-  // 3) Ensure SUPER_ADMIN role mapping
-  const superAdminRole = await prisma.role.findUnique({ where: { name: 'SUPER_ADMIN' } });
-  if (!superAdminRole) {
-    throw new Error('SUPER_ADMIN role not found (seed roles should have created it)');
-  }
-
-  await prisma.userRole.upsert({
-    where: {
-      userId_roleId: {
-        userId: user.id,
-        roleId: superAdminRole.id,
+  // Give DRIVER specific permissions
+  const driverRole = createdRoles.find((r) => r.name === 'DRIVER');
+  if (driverRole) {
+    const driverPerms = await prisma.permission.findMany({
+      where: {
+        OR: [{ name: { startsWith: 'rides.' } }, { name: { startsWith: 'drivers.' } }],
       },
-    },
-    update: {},
-    create: {
-      userId: user.id,
-      roleId: superAdminRole.id,
-    },
-  });
+    });
+    for (const perm of driverPerms) {
+       await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: driverRole.id,
+            permissionId: perm.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: driverRole.id,
+          permissionId: perm.id,
+        },
+      });
+    }
+  }
+
+  // Give PASSENGER specific permissions
+  const passengerRole = createdRoles.find((r) => r.name === 'PASSENGER');
+  if (passengerRole) {
+    const passengerPerms = await prisma.permission.findMany({
+      where: {
+        OR: [{ name: { startsWith: 'rides.' } }, { name: { startsWith: 'passengers.' } }],
+      },
+    });
+    for (const perm of passengerPerms) {
+       await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: passengerRole.id,
+            permissionId: perm.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: passengerRole.id,
+          permissionId: perm.id,
+        },
+      });
+    }
+  }
+
+  console.log('Seeding completed.');
 }
 
 main()
-  .then(async () => {
-    await prisma.$disconnect();
-  })
-  .catch(async (e) => {
+  .catch((e) => {
     console.error(e);
-    await prisma.$disconnect();
     process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
   });
