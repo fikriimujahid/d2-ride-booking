@@ -1,76 +1,34 @@
-# Backend (Node.js + Express + TypeScript)
+# Backend (NestJS)
 
-## Local run
+Production-ready NestJS skeleton with a security baseline, Swagger, and a health endpoint.
 
-1. Install deps
+## Prerequisites
+
+- Node.js (LTS recommended)
+
+## Install
 
 ```bash
-cd backend
 npm install
 ```
 
-2. Create a `.env`
+## Run (dev)
 
 ```bash
-copy .env.example .env
+npm run start:dev
 ```
 
-If you want to use the database layer, set `DATABASE_URL` in `.env`.
+The server listens on `PORT` (default: `3000`).
 
-3. Start dev server
+## Health Check
 
-```bash
-npm run dev
-```
+- `GET /health` → `{ "status": "ok" }`
 
-Health check:
-- `GET http://localhost:3000/health`
+## Swagger
 
-## Auth (JWT)
+- Swagger UI: `http://localhost:3000/api`
+- OpenAPI JSON: `http://localhost:3000/api-json`
 
-The API supports JWT verification via `Authorization: Bearer <token>`.
+## Environment
 
-Roles:
-- `admin`
-- `driver`
-- `passenger`
-
-To verify auth end-to-end (non-business test endpoint):
-- `GET http://localhost:3000/auth/whoami` (requires a valid token)
-
-Required token claims:
-- `sub` (user id)
-- `role` (one of the roles above)
-
-Env:
-- `JWT_SECRET` (required to verify JWTs)
-- `JWT_ISSUER` (optional)
-- `JWT_AUDIENCE` (optional)
-
-## Database
-
-Migrations are plain `.sql` files in `db/migrations`, applied in filename order.
-
-If you see `The server does not support SSL connections`, set `DB_SSL=false` in `.env` (and remove `sslmode=require` from `DATABASE_URL` if present).
-
-- Run migrations: `npm run db:migrate`
-- Run example raw query: `npm run db:example`
-
-## Scripts
-
-- `npm run dev` - run with file watch
-- `npm run build` - compile to `dist/`
-- `npm start` - run compiled server
-- `npm run lint` - eslint
-- `npm run format` - prettier
-- `npm run typecheck` - TypeScript typecheck
-
-## E2E auth test
-
-Runs a self-contained script that boots the API on a random port, then checks:
-- `/health` returns 200
-- `/auth/whoami` returns 401 without a token
-- `/auth/whoami` returns 200 with a valid JWT
-
-Command:
-- `npm run test:e2e:auth`
+Copy `.env.example` to `.env` and adjust values as needed.
