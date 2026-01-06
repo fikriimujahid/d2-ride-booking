@@ -10,12 +10,13 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(uuid())
-  email     String     @unique
-  name      String?
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  userRoles UserRole[]
+  id         String     @id @default(uuid())
+  email      String     @unique
+  cognitoSub String     @unique
+  name       String?
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  userRoles  UserRole[]
 
   @@map("users")
 }

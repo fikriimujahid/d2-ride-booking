@@ -126,6 +126,35 @@ async function main() {
     }
   }
 
+  // Give OPERATIONS_MANAGER specific permissions
+  const opsRole = createdRoles.find((r) => r.name === 'OPERATIONS_MANAGER');
+  if (opsRole) {
+    const opsPerms = await prisma.permission.findMany({
+      where: {
+        OR: [
+            { name: { startsWith: 'rides.' } }, 
+            { name: { startsWith: 'drivers.' } },
+            { name: { startsWith: 'passengers.' } }
+        ],
+      },
+    });
+    for (const perm of opsPerms) {
+       await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: opsRole.id,
+            permissionId: perm.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: opsRole.id,
+          permissionId: perm.id,
+        },
+      });
+    }
+  }
+
   console.log('Seeding completed.');
 }
 
