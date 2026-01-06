@@ -35,6 +35,14 @@ async function bootstrap() {
     .setTitle('D2 Ride Booking API')
     .setDescription('Backend API (skeleton)')
     .setVersion('0.1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+      },
+      'bearer',
+    )
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
