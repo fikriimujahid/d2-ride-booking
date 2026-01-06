@@ -113,3 +113,15 @@ npm run db:seed
 ```
 
 Optional: bootstrap a SUPER_ADMIN user in both Cognito + Postgres by setting `SUPER_ADMIN_EMAIL` (and optionally `SUPER_ADMIN_PASSWORD`) before running the seed.
+
+Provision demo users in BOTH Cognito and Postgres (temporary passwords, force password change):
+
+```bash
+npm run seed:demo-users
+```
+
+This creates:
+
+- `superadmin@example.com` → Cognito Group `Admin`
+- `driver1@example.com` → Cognito Group `Driver`
+- `passenger1@example.com` → Cognito Group `Passenger`

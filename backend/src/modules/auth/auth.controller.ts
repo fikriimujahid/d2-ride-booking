@@ -12,6 +12,7 @@ import { JwtAuthGuard } from './jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RespondChallengeDto } from './dto/respond-challenge.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -38,6 +39,17 @@ export class AuthController {
   })
   async respondChallenge(@Body() dto: RespondChallengeDto) {
     return this.authService.respondChallenge(dto);
+  }
+
+  @Post('update-password')
+  @ApiOperation({ summary: 'Complete NEW_PASSWORD_REQUIRED (set new password)' })
+  @ApiBody({ type: UpdatePasswordDto })
+  @ApiOkResponse({
+    description:
+      'On success returns a relogin-required response (no tokens). If another challenge is required, returns next challengeName + session.',
+  })
+  async updatePassword(@Body() dto: UpdatePasswordDto) {
+    return this.authService.updatePasswordForNewPasswordRequired(dto);
   }
 
   @Get('whoami')

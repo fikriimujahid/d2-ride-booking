@@ -11,6 +11,7 @@ import {
 import { createHmac } from 'node:crypto';
 
 import type { RespondChallengeDto } from './dto/respond-challenge.dto';
+import type { UpdatePasswordDto } from './dto/update-password.dto';
 
 type LoginResult =
   | {
@@ -217,6 +218,51 @@ export class AuthService {
           ...dto.challengeResponses,
           USERNAME: username,
           ...(secretHash ? { SECRET_HASH: secretHash } : {}),
+        },
+      }),
+    );
+
+    if (res.AuthenticationResult?.AccessToken) {
+      return {
+        status: 'SUCCESS' as const,
+        requireRelogin: true as const,
+        message: 'Password updated. Please login again.',
+      };
+    }
+
+    if (res.ChallengeName && res.Session) {
+      return {
+        status: 'CHALLENGE' as const,
+        challengeName: res.ChallengeName,
+        session: res.Session,
+        challengeParameters: res.ChallengeParameters,
+      };
+    }
+
+    throw new BadRequestException('Unexpected Cognito response');
+  }
+
+  async updatePasswordForNewPasswordRequired(dto: UpdatePasswordDto) {
+    const username = dto.username;
+    const secretHash = this.secretHash(username);
+
+    const attributeResponses: Record<string, string> = {};
+    if (dto.requiredAttributes) {
+      for (const [key, value] of Object.entries(dto.requiredAttributes)) {
+        attributeResponses[`userAttributes.${key}`] = value;
+      }
+    }
+
+    const res = await this.client.send(
+      new RespondToAuthChallengeCommand({
+        ClientId: this.clientId,
+        ChallengeName: 'NEW_PASSWORD_REQUIRED',
+        Session: dto.session,
+        ChallengeResponses: {
+          USERNAME: username,
+          NEW_PASSWORD: dto.newPassword,
+          ...(secretHash ? { SECRET_HASH: secretHash } : {}),
+          ...attributeResponses,
         },
       }),
     );
