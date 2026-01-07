@@ -7,14 +7,19 @@ output "user_pool_id" {
 }
 
 output "user_pool_client_id" {
-  description = "The unique ID of the Cognito User Pool Client for web applications"
+  description = "The unique ID of the Cognito User Pool Client for SPA/browser apps (no secret)"
   value       = aws_cognito_user_pool_client.web.id
 }
 
 output "user_pool_client_secret" {
-  description = "The client secret for the Cognito User Pool Client (Sensitive)"
-  value       = aws_cognito_user_pool_client.web.client_secret
+  description = "The client secret for the server-side Cognito User Pool Client (Sensitive)"
+  value       = aws_cognito_user_pool_client.server.client_secret
   sensitive   = true
+}
+
+output "user_pool_client_id_server" {
+  description = "The unique ID of the server-side Cognito User Pool Client"
+  value       = aws_cognito_user_pool_client.server.id
 }
 
 output "user_pool_arn" {

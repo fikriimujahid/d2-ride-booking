@@ -25,6 +25,18 @@ variable "github_repo" {
   default     = "fikriimujahid/d2-ride-booking" # Adjust default as needed
 }
 
+variable "github_oidc_provider_arn" {
+  description = "ARN of the GitHub Actions OIDC provider (if set, creates a deploy role). Example: arn:aws:iam::<acct>:oidc-provider/token.actions.githubusercontent.com"
+  type        = string
+  default     = ""
+}
+
+variable "github_allowed_subs" {
+  description = "Allowed GitHub OIDC subject patterns (token.actions.githubusercontent.com:sub). Leave empty to use module defaults based on github_repo."
+  type        = list(string)
+  default     = []
+}
+
 # ============================================================================
 # Auth Module Variables
 # ============================================================================
@@ -110,4 +122,37 @@ variable "instance_type_websocket" {
 variable "instance_type_bastion" {
   type    = string
   default = "t3.micro"
+}
+
+# ============================================================================
+# Bootstrap (Single EC2) Variables
+# ============================================================================
+variable "bootstrap_instance_type" {
+  description = "Instance type for the single bootstrap EC2"
+  type        = string
+  default     = "t2.micro"
+}
+
+variable "bootstrap_enable_ssh" {
+  description = "Enable inbound SSH (22) to the bootstrap instance"
+  type        = bool
+  default     = false
+}
+
+variable "bootstrap_key_name" {
+  description = "EC2 key pair name to use when bootstrap_enable_ssh=true"
+  type        = string
+  default     = null
+}
+
+variable "bootstrap_ssh_admin_cidrs" {
+  description = "Admin CIDR blocks allowed to SSH when bootstrap_enable_ssh=true (e.g., ['203.0.113.10/32'])"
+  type        = list(string)
+  default     = []
+}
+
+variable "bootstrap_allowed_app_cidrs" {
+  description = "CIDR blocks allowed to reach the API app port on the bootstrap instance (default: public)."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
 }

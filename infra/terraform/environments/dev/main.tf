@@ -83,6 +83,67 @@ module "auth" {
 }
 
 # ============================================================================
+# Bootstrap (Single EC2 in Public Subnet)
+# ============================================================================
+module "bootstrap" {
+  source = "../../modules/bootstrap-ec2"
+
+  project     = var.project
+  environment = var.environment
+  tags        = local.common_tags
+
+  vpc_cidr            = var.vpc_cidr
+  availability_zone   = var.availability_zones[0]
+  public_subnet_cidr  = var.public_subnet_cidrs[0]
+  ami_id              = data.aws_ami.amazon_linux_2023.id
+  instance_type       = var.bootstrap_instance_type
+
+  enable_ssh      = var.bootstrap_enable_ssh
+  key_name        = var.bootstrap_key_name
+  ssh_admin_cidrs = var.bootstrap_ssh_admin_cidrs
+
+  allowed_app_cidrs = var.bootstrap_allowed_app_cidrs
+
+  github_oidc_provider_arn = var.github_oidc_provider_arn
+  github_repo              = var.github_repo
+  github_allowed_subs       = var.github_allowed_subs
+}
+
+# ============================================================================
+# Static Frontends (Public S3 Website)
+# NOTE: S3 website endpoints are HTTP-only. This is intentionally minimal.
+# ============================================================================
+module "frontend_admin" {
+  source = "../../modules/static-site-s3"
+
+  project     = var.project
+  environment = var.environment
+  tags        = local.common_tags
+
+  site_name = "admin"
+}
+
+module "frontend_driver" {
+  source = "../../modules/static-site-s3"
+
+  project     = var.project
+  environment = var.environment
+  tags        = local.common_tags
+
+  site_name = "driver"
+}
+
+module "frontend_passenger" {
+  source = "../../modules/static-site-s3"
+
+  project     = var.project
+  environment = var.environment
+  tags        = local.common_tags
+
+  site_name = "passenger"
+}
+
+# ============================================================================
 # Networking Module
 # ============================================================================
 # module "networking" {

@@ -154,18 +154,19 @@ resource "aws_cognito_user_group" "driver" {
 # RESOURCE: Cognito User Pool Client (Web Application)
 # ----------------------------------------------------------------------------
 resource "aws_cognito_user_pool_client" "web" {
-  name = "${var.project}-${var.environment}-web-client"
+  # SPA/public client (no secret): used by browser-based apps (Amplify / AWS SDK)
+  name = "${var.project}-${var.environment}-spa-client"
 
   # TERRAFORM CONCEPT: attribute references create an implicit dependency on the user pool.
   user_pool_id = aws_cognito_user_pool.main.id
 
-  # Backend clients SHOULD have secrets; authentication happens server-side.
-  generate_secret = true // pragma: allowlist secret
+  # IMPORTANT: Browser/SPAs must NOT use a client secret.
+  generate_secret = false
 
-  # Backend auth flows (server-side only)
+  # Auth flows for SPA (no Hosted UI): SRP is recommended; USER_PASSWORD_AUTH is supported.
   explicit_auth_flows = [
-    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
+    "ALLOW_USER_SRP_AUTH",
     "ALLOW_USER_PASSWORD_AUTH"
   ]
 
@@ -188,7 +189,38 @@ resource "aws_cognito_user_pool_client" "web" {
   prevent_user_existence_errors = "ENABLED"
 
   # Allow immediate logout/token invalidation instead of waiting for expiry.
-  enable_token_revocation = true // pragma: allowlist secret 
+  enable_token_revocation = true
 
   # No hosted UI; authentication happens via API calls from the SPA.
+}
+
+
+# ============================================================================
+# RESOURCE: Cognito User Pool Client (Server / Backend)
+# ----------------------------------------------------------------------------
+resource "aws_cognito_user_pool_client" "server" {
+  name        = "${var.project}-${var.environment}-server-client"
+  user_pool_id = aws_cognito_user_pool.main.id
+
+  # Server-side client MAY have a secret (never exposed to browsers).
+  generate_secret = true // pragma: allowlist secret
+
+  # Server-side auth flows (only use if your backend truly needs to call Cognito directly)
+  explicit_auth_flows = [
+    "ALLOW_ADMIN_USER_PASSWORD_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH"
+  ]
+
+  prevent_user_existence_errors = "ENABLED"
+  enable_token_revocation       = true // pragma: allowlist secret
+
+  access_token_validity  = 60
+  id_token_validity      = 60
+  refresh_token_validity = 30
+
+  token_validity_units {
+    access_token  = "minutes" // pragma: allowlist secret
+    id_token      = "minutes"
+    refresh_token = "days" // pragma: allowlist secret
+  }
 }
