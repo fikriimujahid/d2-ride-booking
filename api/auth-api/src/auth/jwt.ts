@@ -18,7 +18,6 @@ type JwtConfig = {
 type AccessClaims = {
   typ: 'access';
   ut: UserType;
-  perm?: string[];
 };
 
 type MfaClaims = {
@@ -78,12 +77,11 @@ export function createJwtService(config: JwtConfig) {
   }
 
   return {
-    signAccessToken: async (opts: { userId: string; userType: UserType; aud: string; permissions?: string[] }) => {
+    signAccessToken: async (opts: { userId: string; userType: UserType; aud: string }) => {
       const payload: JWTPayload & AccessClaims = {
         sub: opts.userId,
         typ: 'access',
-        ut: opts.userType,
-        ...(opts.permissions ? { perm: opts.permissions } : {})
+        ut: opts.userType
       };
       return signBase(payload, { aud: opts.aud, ttlSeconds: config.accessTtlSeconds });
     },

@@ -30,8 +30,7 @@ export async function authenticateAccessToken(app: FastifyInstance, req: Fastify
   const ctx: AuthContext = {
     userId,
     userType,
-    audience: expected.aud,
-    permissions: Array.isArray((payload as any).perm) ? ((payload as any).perm as string[]) : undefined
+    audience: expected.aud
   };
 
   (req as any).auth = ctx;
@@ -48,6 +47,8 @@ export function requirePermission(req: FastifyRequest, perm: string) {
   const auth = (req as any).auth as AuthContext | undefined;
   if (!auth) throw httpError(401, 'Missing auth');
   if (auth.userType !== 'ADMIN') throw httpError(403, 'Forbidden');
+  // IMPORTANT: permissions must be loaded from DB by the route/middleware.
+  // Frontend permission checks are UX only; backend must always enforce.
   if (!auth.permissions?.includes(perm)) throw httpError(403, 'Missing permission');
 }
 

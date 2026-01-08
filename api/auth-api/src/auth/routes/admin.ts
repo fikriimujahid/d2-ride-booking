@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { verifyPassword } from '../password.js';
 import { enforceAdminOrigin } from '../middleware.js';
-import { getEffectiveAdminPermissions } from '../../rbac/permissions.js';
+import { getEffectiveAdminPermissions, getUserAdminRoles } from '../../rbac/permissions.js';
 import { aes256gcmDecrypt, aes256gcmEncrypt } from '../../util/crypto.js';
 import { buildOtpauthUri, generateTotpSecret, verifyTotp } from '../totp.js';
 import { issueRefreshToken, revokeRefreshTokenByRaw, rotateRefreshToken } from '../refreshTokens.js';
@@ -184,8 +184,7 @@ export async function registerAdminAuthRoutes(app: FastifyInstance) {
     const secret = aes256gcmDecrypt(totpRow.rows[0].secret_enc, totpKey).toString('utf8');
     if (!verifyTotp(body.code, secret)) throw httpError(401, 'Invalid 2FA code');
 
-    const perms = await getEffectiveAdminPermissions(app.db, userId);
-    const accessToken = await app.jwt.signAccessToken({ userId, userType: 'ADMIN', aud, permissions: perms });
+    const accessToken = await app.jwt.signAccessToken({ userId, userType: 'ADMIN', aud });
 
     const refresh = await issueRefreshToken(app.db, {
       userId,
@@ -298,8 +297,7 @@ export async function registerAdminAuthRoutes(app: FastifyInstance) {
 
     await app.db.query('update admin_totp set enabled = true, enrolled_at = now() where user_id = $1', [userId]);
 
-    const perms = await getEffectiveAdminPermissions(app.db, userId);
-    const accessToken = await app.jwt.signAccessToken({ userId, userType: 'ADMIN', aud, permissions: perms });
+    const accessToken = await app.jwt.signAccessToken({ userId, userType: 'ADMIN', aud });
 
     const refresh = await issueRefreshToken(app.db, {
       userId,
@@ -310,7 +308,11 @@ export async function registerAdminAuthRoutes(app: FastifyInstance) {
 
     await app.db.query('update users set last_login_at = now() where id = $1', [userId]);
 
-    return reply.send({ accessToken, refreshToken: refresh.refreshToken, expiresAt: refresh.expiresAt.toISOString() });
+    return reply.send({
+      accessToken,
+      refreshToken: refresh.refreshToken,
+      expiresAt: refresh.expiresAt.toISOString()
+    });
     }
   );
 
@@ -352,10 +354,13 @@ export async function registerAdminAuthRoutes(app: FastifyInstance) {
       ua: req.headers['user-agent']
     });
 
-    const perms = await getEffectiveAdminPermissions(app.db, rotated.userId);
-    const accessToken = await app.jwt.signAccessToken({ userId: rotated.userId, userType: 'ADMIN', aud, permissions: perms });
+    const accessToken = await app.jwt.signAccessToken({ userId: rotated.userId, userType: 'ADMIN', aud });
 
-    return reply.send({ accessToken, refreshToken: rotated.refreshToken, expiresAt: rotated.expiresAt.toISOString() });
+    return reply.send({
+      accessToken,
+      refreshToken: rotated.refreshToken,
+      expiresAt: rotated.expiresAt.toISOString()
+    });
     }
   );
 
@@ -390,6 +395,130 @@ export async function registerAdminAuthRoutes(app: FastifyInstance) {
     const body = LogoutSchema.parse(req.body);
     await revokeRefreshTokenByRaw(app.db, body.refreshToken, 'logout');
     return reply.send({ ok: true });
+    }
+  );
+
+  app.get(
+    '/admin/me',
+    {
+      schema: {
+        tags: ['Admin Auth'],
+        summary: 'Get current admin context',
+        description: `
+Returns comprehensive admin user context for frontend consumption.
+This is the single source of truth for admin identity, roles, and permissions.
+
+WHY PERMISSIONS IN RESPONSE (NOT JWT):
+1. JWT size limits: Embedding full permission list bloats tokens
+2. Real-time updates: Permissions can change without re-login
+3. Security: Permissions are authorization data, not authentication
+4. Migration-ready: Future Cognito integration keeps this pattern
+
+DESIGN PRINCIPLES:
+- Identity: Stable user attributes (id, email)
+- Roles: Named role assignments (for display/audit)
+- Permissions: Flattened list (for frontend feature gating)
+- Metadata: Optional contextual data (org, env, feature flags)
+
+FRONTEND USAGE:
+- Call ONCE after successful login/2FA
+- Store result in auth context/store
+- Use permissions array for menu/route/button visibility
+- Backend still validates on every protected endpoint
+        `,
+        response: {
+          200: {
+            type: 'object',
+            required: ['identity', 'roles', 'permissions'],
+            additionalProperties: false,
+            properties: {
+              identity: {
+                type: 'object',
+                required: ['id', 'email', 'userType'],
+                properties: {
+                  id: { type: 'string', description: 'User UUID' },
+                  email: { type: 'string', description: 'Admin email address' },
+                  userType: { type: 'string', enum: ['ADMIN'], description: 'System role (always ADMIN for this endpoint)' },
+                  name: { type: 'string', description: 'Optional display name' }
+                }
+              },
+              roles: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Assigned role names (e.g., ["super_admin", "ops_admin"])'
+              },
+              permissions: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'Flattened permission keys (e.g., ["admin.dashboard.view", "admin.users.edit"])'
+              },
+              featureFlags: {
+                type: 'object',
+                additionalProperties: { type: 'boolean' },
+                description: 'Optional feature flags for controlled rollout (UX only; backend still enforces authorization)'
+              },
+              metadata: {
+                type: 'object',
+                description: 'Optional metadata for frontend features',
+                additionalProperties: false,
+                properties: {
+                  organization: { type: 'string' },
+                  environment: { type: 'string' }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    async (req, reply) => {
+      enforceAdminOrigin(app, req);
+
+      const authHeader = req.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        throw httpError(401, 'Missing or invalid authorization header');
+      }
+
+      const token = authHeader.substring(7);
+      const payload = await app.jwt.verify(token, { aud, typ: 'access' });
+      const userId = String(payload.sub);
+
+      // Fetch user identity
+      const userRow = await app.db.query<{ id: string; email: string; user_type: string }>(
+        "select id, email, user_type from users where id = $1 and user_type = 'ADMIN'",
+        [userId]
+      );
+
+      if (userRow.rowCount !== 1) {
+        throw httpError(404, 'Admin user not found');
+      }
+
+      const user = userRow.rows[0];
+
+      // Fetch effective permissions (with role hierarchy)
+      const permissions = await getEffectiveAdminPermissions(app.db, userId);
+
+      // Fetch assigned roles (direct assignments only, for display)
+      const roles = await getUserAdminRoles(app.db, userId);
+
+      // Build admin context response
+      return reply.send({
+        identity: {
+          id: user.id,
+          email: user.email,
+          userType: 'ADMIN' as const,
+          // No stable name field exists in this schema yet; keep optional.
+          name: undefined
+        },
+        roles,
+        permissions,
+        // Optional: feature flags can be wired from config/env later.
+        // Kept as a stable contract for future rollout controls.
+        featureFlags: {},
+        metadata: {
+          environment: process.env.NODE_ENV || 'development'
+        }
+      });
     }
   );
 }

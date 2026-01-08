@@ -25,3 +25,16 @@ export async function getEffectiveAdminPermissions(db: Pool, userId: string): Pr
 
   return result.rows.map((r: { key: string }) => r.key);
 }
+
+export async function getUserAdminRoles(db: Pool, userId: string): Promise<string[]> {
+  const result = await db.query<{ name: string }>(
+    `select distinct r.name
+     from admin_user_roles ur
+     join admin_roles r on r.id = ur.role_id
+     where ur.user_id = $1
+     order by r.name`,
+    [userId]
+  );
+
+  return result.rows.map((r: { name: string }) => r.name);
+}

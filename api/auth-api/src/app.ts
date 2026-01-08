@@ -1,10 +1,12 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
 import { loadConfig } from './config.js';
 import { createDbPool } from './db/pool.js';
 import { createJwtService } from './auth/jwt.js';
 import { registerAdminAuthRoutes } from './auth/routes/admin.js';
 import { registerDriverAuthRoutes } from './auth/routes/driver.js';
 import { registerPassengerAuthRoutes } from './auth/routes/passenger.js';
+import { registerAdminManagementRoutes } from './admin/routes/management.js';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 
@@ -42,6 +44,39 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.decorate('config', config);
   app.decorate('db', createDbPool(config.databaseUrl));
   app.decorate('jwt', createJwtService(config.jwt));
+
+  // CORS configuration
+  await app.register(cors, {
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g., mobile apps, Postman)
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      // Parse allowed origins from config
+      const allowedOrigins = config.adminWebOrigins || [];
+      
+      // Allow any localhost/127.0.0.1 in development
+      if (config.nodeEnv === 'development' && 
+          (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
+        callback(null, true);
+        return;
+      }
+
+      // Check if origin is in allowlist
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      // Reject
+      callback(new Error('Not allowed by CORS'), false);
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  });
 
   await app.register(swagger, {
     openapi: {
@@ -103,6 +138,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await registerAdminAuthRoutes(app);
+  await registerAdminManagementRoutes(app);
   await registerDriverAuthRoutes(app);
   await registerPassengerAuthRoutes(app);
 

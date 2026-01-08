@@ -22,16 +22,59 @@ const SeedEnv = z.object({
 
 type PermissionSeed = { key: string; description: string };
 
+/**
+ * PERMISSION DESIGN PRINCIPLES
+ * 
+ * 1. Granular & Feature-Aligned: Each permission maps to a specific UI feature or action
+ * 2. Frontend-Friendly: Permission names clearly indicate what UI elements they control
+ * 3. Backend-Enforceable: Backend validates these on every protected endpoint
+ * 4. Migration-Ready: Permission keys are stable strings that survive auth provider changes
+ * 
+ * Naming convention: <domain>.<resource>.<action>
+ * - domain: admin (vs driver/passenger in future)
+ * - resource: dashboard, passengers, drivers, etc.
+ * - action: view, create, edit, delete, manage, export
+ */
 const DEFAULT_PERMISSIONS: PermissionSeed[] = [
-  { key: 'admin.users.read', description: 'Read users' },
-  { key: 'admin.users.write', description: 'Create/update/disable users' },
-  { key: 'admin.roles.read', description: 'Read roles' },
-  { key: 'admin.roles.write', description: 'Create/update roles and inheritance' },
-  { key: 'admin.permissions.read', description: 'Read permissions catalog' },
-  { key: 'admin.permissions.write', description: 'Manage permissions catalog' },
-  { key: 'admin.rides.read', description: 'Read rides' },
-  { key: 'admin.rides.write', description: 'Manage rides' },
-  { key: 'admin.reports.read', description: 'Read reports' }
+  // Dashboard & Operations
+  { key: 'admin.dashboard.view', description: 'View live operations dashboard' },
+  { key: 'admin.dashboard.control', description: 'Control rides and dispatch operations' },
+  
+  // Passenger Management
+  { key: 'admin.passengers.view', description: 'View passenger list and profiles' },
+  { key: 'admin.passengers.edit', description: 'Edit passenger information' },
+  { key: 'admin.passengers.delete', description: 'Delete/suspend passengers' },
+  
+  // Driver Management
+  { key: 'admin.drivers.view', description: 'View driver list and profiles' },
+  { key: 'admin.drivers.edit', description: 'Edit driver information and approvals' },
+  { key: 'admin.drivers.delete', description: 'Delete/suspend drivers' },
+  
+  // Dispute Resolution
+  { key: 'admin.disputes.view', description: 'View disputes and support tickets' },
+  { key: 'admin.disputes.resolve', description: 'Resolve disputes and issue refunds' },
+  
+  // Pricing & Promotions
+  { key: 'admin.pricing.view', description: 'View pricing rules and promotions' },
+  { key: 'admin.pricing.manage', description: 'Create and modify pricing rules' },
+  
+  // Analytics & Reports
+  { key: 'admin.analytics.view', description: 'View analytics dashboards' },
+  { key: 'admin.analytics.export', description: 'Export reports and data' },
+  
+  // Fraud Detection & Audit
+  { key: 'admin.fraud.view', description: 'View fraud detection dashboard' },
+  { key: 'admin.fraud.investigate', description: 'Investigate and flag fraudulent activity' },
+  
+  // Admin & RBAC Management
+  { key: 'admin.admins.view', description: 'View admin users list' },
+  { key: 'admin.admins.manage', description: 'Create/edit/delete admin users' },
+  { key: 'admin.roles.view', description: 'View roles and permissions' },
+  { key: 'admin.roles.manage', description: 'Create/edit roles and assign permissions' },
+  
+  // System Settings
+  { key: 'admin.settings.view', description: 'View system settings' },
+  { key: 'admin.settings.manage', description: 'Modify system configuration' }
 ];
 
 async function upsertPermission(db: ReturnType<typeof createDbPool>, p: PermissionSeed) {
@@ -158,29 +201,53 @@ async function main() {
     }
 
     // 2) Roles + hierarchy
-    const roleSuperAdmin = await upsertRole(client as any, 'super_admin', 'Full access');
-    const roleOps = await upsertRole(client as any, 'ops_admin', 'Operations admin');
-    const roleSupport = await upsertRole(client as any, 'support_admin', 'Support admin');
+    //
+    // ROLE DESIGN:
+    // - support_admin: Read-only access to support tickets, user profiles, basic analytics
+    // - ops_admin: Full operations control (dashboard, disputes, pricing)
+    // - super_admin: Full system access including RBAC management
+    //
+    // Hierarchy: super_admin inherits from ops_admin and support_admin
+    
+    const roleSuperAdmin = await upsertRole(client as any, 'super_admin', 'Full system access including RBAC management');
+    const roleOps = await upsertRole(client as any, 'ops_admin', 'Operations admin - full control over rides, pricing, disputes');
+    const roleSupport = await upsertRole(client as any, 'support_admin', 'Support admin - read-only access to help users');
 
-    // support gets read-only on users/rides/reports
-    await attachRolePermission(client as any, roleSupport, permIds.get('admin.users.read')!);
-    await attachRolePermission(client as any, roleSupport, permIds.get('admin.rides.read')!);
-    await attachRolePermission(client as any, roleSupport, permIds.get('admin.reports.read')!);
+    // Support Admin: Read-only permissions
+    await attachRolePermission(client as any, roleSupport, permIds.get('admin.dashboard.view')!);
+    await attachRolePermission(client as any, roleSupport, permIds.get('admin.passengers.view')!);
+    await attachRolePermission(client as any, roleSupport, permIds.get('admin.drivers.view')!);
+    await attachRolePermission(client as any, roleSupport, permIds.get('admin.disputes.view')!);
+    await attachRolePermission(client as any, roleSupport, permIds.get('admin.analytics.view')!);
 
-    // ops gets rides write + users read
-    await attachRolePermission(client as any, roleOps, permIds.get('admin.users.read')!);
-    await attachRolePermission(client as any, roleOps, permIds.get('admin.rides.read')!);
-    await attachRolePermission(client as any, roleOps, permIds.get('admin.rides.write')!);
+    // Ops Admin: Full operational control (inherits support + adds write permissions)
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.dashboard.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.dashboard.control')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.passengers.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.passengers.edit')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.drivers.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.drivers.edit')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.disputes.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.disputes.resolve')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.pricing.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.pricing.manage')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.analytics.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.analytics.export')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.fraud.view')!);
+    await attachRolePermission(client as any, roleOps, permIds.get('admin.fraud.investigate')!);
 
-    // super_admin inherits ops + support and has RBAC management
+    // Super Admin: Inherits all ops + support permissions via hierarchy, plus RBAC management
     await attachRoleInheritance(client as any, roleSuperAdmin, roleOps);
     await attachRoleInheritance(client as any, roleSuperAdmin, roleSupport);
-
-    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.users.write')!);
-    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.roles.read')!);
-    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.roles.write')!);
-    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.permissions.read')!);
-    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.permissions.write')!);
+    
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.passengers.delete')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.drivers.delete')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.admins.view')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.admins.manage')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.roles.view')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.roles.manage')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.settings.view')!);
+    await attachRolePermission(client as any, roleSuperAdmin, permIds.get('admin.settings.manage')!);
 
     // 3) Users
     const adminHash = await hashPassword(env.SEED_ADMIN_PASSWORD);
