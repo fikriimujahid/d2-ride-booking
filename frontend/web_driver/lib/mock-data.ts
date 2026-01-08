@@ -1,0 +1,107 @@
+export const mockDriver = {
+  id: "driver_001",
+  name: "Alex Johnson",
+  email: "alex.johnson@example.com",
+  phone: "+1 (555) 123-4567",
+  rating: 4.8,
+  totalTrips: 1250,
+  joinDate: "2022-03-15",
+  profileImage: "https://avatar.vercel.sh/alex",
+  vehicle: {
+    make: "Toyota",
+    model: "Camry",
+    year: 2022,
+    licensePlate: "ABC123XY",
+    color: "Silver",
+    seatingCapacity: 5,
+  },
+  payoutMethod: "Bank Transfer",
+  bankAccount: "****5678",
+}
+
+export const mockTodayStats = {
+  tripsCompleted: 12,
+  earnings: 156.5,
+  distance: 87.3,
+  hours: 8.5,
+}
+
+export const mockWeeklyEarnings = [
+  { day: "Mon", earnings: 145.5 },
+  { day: "Tue", earnings: 168.75 },
+  { day: "Wed", earnings: 156.5 },
+  { day: "Thu", earnings: 182.3 },
+  { day: "Fri", earnings: 210.6 },
+  { day: "Sat", earnings: 245.8 },
+  { day: "Sun", earnings: 198.4 },
+]
+
+export const mockMonthlyStats = {
+  totalEarnings: 5342.5,
+  totalTrips: 287,
+  totalDistance: 2410,
+  totalHours: 187,
+}
+
+export const mockTrips = [
+  {
+    id: 1,
+    date: "2024-01-08",
+    time: "14:30",
+    pickup: "Downtown Transit Station",
+    dropoff: "International Airport",
+    distance: 24.5,
+    duration: 32,
+    earnings: 45.6,
+    rating: 5,
+    status: "completed",
+  },
+  {
+    id: 2,
+    date: "2024-01-08",
+    time: "12:15",
+    pickup: "Central Mall",
+    dropoff: "Residential Area",
+    distance: 12.3,
+    duration: 18,
+    earnings: 28.4,
+    rating: 5,
+    status: "completed",
+  },
+  {
+    id: 3,
+    date: "2024-01-08",
+    time: "09:45",
+    pickup: "Business District",
+    dropoff: "Downtown Hotel",
+    distance: 8.7,
+    duration: 15,
+    earnings: 22.5,
+    rating: 4,
+    status: "completed",
+  },
+  {
+    id: 4,
+    date: "2024-01-07",
+    time: "18:20",
+    pickup: "Airport Terminal 2",
+    dropoff: "Downtown Transit Station",
+    distance: 25.0,
+    duration: 35,
+    earnings: 52.3,
+    rating: 5,
+    status: "completed",
+  },
+  {
+    id: 5,
+    date: "2024-01-07",
+    time: "15:30",
+    pickup: "Shopping Mall",
+    dropoff: "Residential Area",
+    distance: 14.2,
+    duration: 20,
+    earnings: 32.8,
+    rating: 5,
+    status: "completed",
+  },
+]
