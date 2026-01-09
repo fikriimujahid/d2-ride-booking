@@ -63,25 +63,42 @@ aws ssm start-session --target i-0abc123...
 ssh -i your-key.pem ec2-user@54.123.45.67
 ```
 
-**Install Node.js 20** (required for backend + Next.js apps):
-```bash
-# Download and install Node.js 20
-curl -fsSL https://rpm.nodesource.com/setup_24.x | sudo bash -
-sudo yum install -y nodejs
+**Bootstrap prerequisites (automatic via Terraform `user_data`)**:
 
-# Verify
-node --version  # Should show v20.x.x
+Terraform provisions the EC2 instance with these already installed/configured:
+- Docker engine enabled and started
+- Docker Compose v2 installed (as a Docker CLI plugin)
+- Node.js 20 + npm
+- AWS CLI + git + curl
+- SSM Agent started (for Session Manager and Run Command)
+- `ec2-user` added to the `docker` group (log out/in to take effect)
+
+This runbook installs the repo’s deployment scripts and service units as manual steps below.
+
+**Verify `user_data` installed everything**:
+```bash
+# 1) cloud-init status (user_data runs via cloud-init)
+sudo cloud-init status --wait
+
+# 2) cloud-init output log (best place to debug failures)
+sudo tail -n 200 /var/log/cloud-init-output.log
+
+# 3) Verify tools/services
+sudo systemctl status docker --no-pager
+sudo docker version
+sudo docker compose version
+node --version
 npm --version
+
+# 4) Marker file created by user_data
+cat /home/ec2-user/bootstrap-user-data-status.txt
 ```
+
+Manual steps start below (repo clone, DB init, env files, services).
 
 **Install PostgreSQL 18** (required for backend database):
 ```bash
-# PostgreSQL 18 on Amazon Linux 2023 (Docker Compose)
-# Note: PGDG RPMs target RHEL/Fedora and require /etc/redhat-release.
-# Using Docker Compose keeps the database config in the repo and is easier to manage.
-
 # Docker + Docker Compose are installed by Terraform user_data on the bootstrap EC2 instance.
-# If you created the instance before this change, either recreate the instance or install Docker manually.
 
 # Verify Docker + Compose are available
 sudo docker version

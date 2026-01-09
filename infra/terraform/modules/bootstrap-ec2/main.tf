@@ -284,6 +284,10 @@ resource "aws_instance" "app" {
               systemctl enable docker
               systemctl start docker
 
+              # Install Node.js 20 (required for backend + Next.js apps)
+              curl -fsSL https://rpm.nodesource.com/setup_20.x | bash -
+              dnf install -y nodejs
+
               # Install Docker Compose v2 (AL2023 may not have docker-compose-plugin in dnf)
               ARCH="$(uname -m)"
               case "$ARCH" in
@@ -306,104 +310,14 @@ resource "aws_instance" "app" {
 
               usermod -aG docker ec2-user
 
-              mkdir -p /opt/app
-
-              cat > /etc/systemd/system/d2-app.service <<'UNIT'
-              [Unit]
-              Description=D2 Bootstrap App (Docker Compose)
-              After=docker.service network-online.target
-              Wants=docker.service network-online.target
-              ConditionPathExists=/opt/app/current/docker-compose.yml
-
-              [Service]
-              Type=simple
-              WorkingDirectory=/opt/app/current
-              ExecStart=/usr/bin/docker compose up
-              ExecStop=/usr/bin/docker compose down
-              Restart=always
-              RestartSec=5
-
-              [Install]
-              WantedBy=multi-user.target
-              UNIT
-
-              systemctl daemon-reload
-              systemctl enable d2-app.service
-
-              cat > /usr/local/bin/push-d2-logs-to-s3 <<'SCRIPT'
-              #!/bin/bash
-              set -euo pipefail
-
-              BUCKET="${aws_s3_bucket.bootstrap.bucket}"
-              HOST="$(hostname -s)"
-              TS="$(date -u +%Y%m%dT%H%M%SZ)"
-              OUT="/tmp/d2-app-$${TS}.log"
-
-              journalctl -u d2-app.service --no-pager > "$OUT" || true
-              aws s3 cp "$OUT" "s3://${aws_s3_bucket.bootstrap.bucket}/logs/${local.name_prefix}/$${HOST}/d2-app-$${TS}.log" || true
-              SCRIPT
-
-              chmod +x /usr/local/bin/push-d2-logs-to-s3
-
-              cat > /etc/systemd/system/d2-logpush.service <<'UNIT'
-              [Unit]
-              Description=Push D2 app logs to S3
-              After=network-online.target
-              Wants=network-online.target
-
-              [Service]
-              Type=oneshot
-              ExecStart=/usr/local/bin/push-d2-logs-to-s3
-              UNIT
-
-              cat > /etc/systemd/system/d2-logpush.timer <<'UNIT'
-              [Unit]
-              Description=Schedule D2 log push
-
-              [Timer]
-              OnBootSec=2m
-              OnUnitActiveSec=15m
-              Persistent=true
-
-              [Install]
-              WantedBy=timers.target
-              UNIT
-
-              systemctl daemon-reload
-              systemctl enable --now d2-logpush.timer
-
-              cat > /usr/local/bin/ssm-deploy <<'SCRIPT'
-              #!/bin/bash
-              set -euo pipefail
-
-              if [[ $# -lt 2 ]]; then
-                echo "Usage: ssm-deploy <s3_bucket> <s3_key>" >&2
-                exit 2
-              fi
-
-              BUCKET="$1"
-              KEY="$2"
-
-              TMP_DIR="/tmp/app-deploy"
-              mkdir -p "$TMP_DIR"
-              aws s3 cp "s3://$BUCKET/$KEY" "$TMP_DIR/artifact.tgz"
-
-              rm -rf /opt/app/current
-              mkdir -p /opt/app/current
-              tar -xzf "$TMP_DIR/artifact.tgz" -C /opt/app/current
-
-              if [[ -x /opt/app/current/deploy/ssm_deploy.sh ]]; then
-                /opt/app/current/deploy/ssm_deploy.sh
-              elif [[ -f /opt/app/current/docker-compose.yml ]]; then
-                cd /opt/app/current
-                systemctl restart d2-app.service
-              else
-                echo "Artifact unpacked to /opt/app/current. No deploy hook found." >&2
-                echo "Add /deploy/ssm_deploy.sh (executable) or a docker-compose.yml to automate startup." >&2
-              fi
-              SCRIPT
-
-              chmod +x /usr/local/bin/ssm-deploy
+              # Simple marker to confirm user_data completed
+              {
+                echo "user_data_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "docker_version=$(/usr/bin/docker --version || true)"
+                echo "compose_version=$(/usr/bin/docker compose version || true)"
+                echo "node_version=$(node --version || true)"
+                echo "npm_version=$(npm --version || true)"
+              } > /home/ec2-user/bootstrap-user-data-status.txt
 
               echo "bootstrap-ready" > /home/ec2-user/bootstrap.txt
               EOF
