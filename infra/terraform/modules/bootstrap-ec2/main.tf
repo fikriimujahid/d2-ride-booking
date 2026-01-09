@@ -293,7 +293,7 @@ resource "aws_instance" "app" {
               esac
 
               mkdir -p /usr/local/lib/docker/cli-plugins
-              curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${COMPOSE_ARCH}" \
+              curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$${COMPOSE_ARCH}" \
                 -o /usr/local/lib/docker/cli-plugins/docker-compose
               chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
