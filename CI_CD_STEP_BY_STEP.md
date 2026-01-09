@@ -108,8 +108,8 @@ cd d2-ride-booking
 # Create .env for docker compose (used by docker-compose.yml)
 cat > .env <<'EOF'
 POSTGRES_PASSWORD=CHANGE_ME_SECURE_PASSWORD
-POSTGRES_DB=ridebooking
-POSTGRES_USER=d2user
+POSTGRES_DB=ride_booking
+POSTGRES_USER=postgres
 EOF
 
 # If you previously started postgres with different env vars, the named volume keeps the old roles.
@@ -121,28 +121,18 @@ sudo docker compose --env-file .env up -d postgres
 
 # Verify PostgreSQL is running
 sudo docker ps --filter name=ridebooking-postgres
-sudo docker exec ridebooking-postgres psql -U d2user -d ridebooking -c "SELECT version();"
+sudo docker exec ridebooking-postgres psql -U postgres -d ride_booking -c "SELECT version();"
 
-# If you get: "FATAL: role 'd2user' does not exist", either:
-# 1) Reset the volume (recommended for fresh setup):
-#    sudo docker compose down -v
-#    sudo docker compose --env-file .env up -d postgres
-#
-# OR 2) Create the role inside the existing database:
-#    sudo docker exec ridebooking-postgres psql -U postgres -d ridebooking \
-#      -c "CREATE ROLE d2user WITH LOGIN PASSWORD 'CHANGE_ME_SECURE_PASSWORD';"
-#    sudo docker exec ridebooking-postgres psql -U postgres -d ridebooking \
-#      -c "ALTER ROLE d2user CREATEDB;"
 ```
 
 **Configure PostgreSQL** (create database and user):
 ```bash
 # With Docker Compose, the database/user are created from .env:
-#   POSTGRES_DB=ridebooking
-#   POSTGRES_USER=d2user
+#   POSTGRES_DB=ride_booking
+#   POSTGRES_USER=postgres
 #   POSTGRES_PASSWORD=CHANGE_ME_SECURE_PASSWORD
 
-echo "✅ PostgreSQL database 'ridebooking' created with user 'd2user'"
+echo "✅ PostgreSQL database 'ride_booking' created with user 'postgres'"
 ```
 
 **Configure PostgreSQL to allow password authentication**:
@@ -156,7 +146,7 @@ echo "✅ PostgreSQL configured for password authentication"
 **Test database connection**:
 ```bash
 # Test connection
-sudo docker exec ridebooking-postgres psql -U d2user -d ridebooking -c "SELECT version();"
+sudo docker exec ridebooking-postgres psql -U postgres -d ride_booking -c "SELECT version();"
 
 # If successful, you should see PostgreSQL version info
 ```
@@ -206,16 +196,49 @@ sudo chmod 755 /etc/d2
 sudo tee /etc/d2/backend.env > /dev/null <<'EOF'
 NODE_ENV=production
 PORT=3000
-DATABASE_URL=postgresql://d2user:CHANGE_ME_SECURE_PASSWORD@localhost:5432/ridebooking
-JWT_ISSUER=https://your-domain.com
+DATABASE_URL=postgres://postgres:CHANGE_ME_SECURE_PASSWORD@localhost:5432/ride_booking
+JWT_ISSUER=d2-ride-booking
 JWT_AUD_ADMIN=admin-web
 JWT_AUD_DRIVER=driver-app
 JWT_AUD_PASSENGER=passenger-app
-JWT_ALG=HS256
-JWT_SECRET=your-production-secret-change-me
+JWT_ALG=EdDSA
+JWT_KEY_ID=auth-2026-01
+JWT_PRIVATE_KEY_PEM="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
+JWT_PUBLIC_KEY_PEM="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
 TOTP_ENC_KEY_BASE64=your-base64-encoded-32-byte-key
 LOG_LEVEL=info
 EOF
+
+# Generate production keys (JWT + TOTP)
+#
+# The backend requires:
+# - TOTP_ENC_KEY_BASE64: 32 random bytes, base64-encoded
+# - If JWT_ALG=EdDSA: Ed25519 private/public key pair in PEM
+#
+# 1) Generate the TOTP encryption key (32 bytes, base64)
+#    Copy the output into TOTP_ENC_KEY_BASE64
+#
+#    openssl rand -base64 32
+#
+# 2) Generate an Ed25519 key pair for JWT signing
+#
+#    openssl genpkey -algorithm ed25519 -out jwt_ed25519_private.pem
+#    openssl pkey -in jwt_ed25519_private.pem -pubout -out jwt_ed25519_public.pem
+#
+# 3) Convert PEM files into single-line env values with literal \n sequences
+#    Copy the printed values into JWT_PRIVATE_KEY_PEM and JWT_PUBLIC_KEY_PEM
+#
+#    python3 - <<'PY'
+# from pathlib import Path
+# priv = Path('jwt_ed25519_private.pem').read_text().strip().replace('\n', '\\n')
+# pub = Path('jwt_ed25519_public.pem').read_text().strip().replace('\n', '\\n')
+# print(f'JWT_PRIVATE_KEY_PEM="{priv}"')
+# print(f'JWT_PUBLIC_KEY_PEM="{pub}"')
+# PY
+
+# If you must use symmetric signing instead (NOT recommended):
+#   JWT_ALG=HS256
+#   JWT_SECRET=<generate a long random string>
 
 # Web Driver env file
 sudo tee /etc/d2/web_driver.env > /dev/null <<'EOF'
@@ -871,10 +894,10 @@ Or automate it by adding this to the `ssm-deploy` script after the symlink updat
 **A**: 
 ```bash
 # Create a backup
-sudo -u postgres pg_dump ridebooking > /tmp/ridebooking-backup-$(date +%Y%m%d).sql
+sudo docker exec -t ridebooking-postgres pg_dump -U postgres -d ride_booking > /tmp/ride_booking-backup-$(date +%Y%m%d).sql
 
 # Restore from backup
-sudo -u postgres psql ridebooking < /tmp/ridebooking-backup-20260109.sql
+cat /tmp/ride_booking-backup-20260109.sql | sudo docker exec -i ridebooking-postgres psql -U postgres -d ride_booking
 ```
 
 For automated backups, consider setting up a cron job or using AWS RDS automated backups.
