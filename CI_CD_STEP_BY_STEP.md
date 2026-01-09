@@ -80,25 +80,12 @@ npm --version
 # Note: PGDG RPMs target RHEL/Fedora and require /etc/redhat-release.
 # Using Docker Compose keeps the database config in the repo and is easier to manage.
 
-# Install & start Docker
-sudo dnf install -y docker
-sudo systemctl enable --now docker
+# Docker + Docker Compose are installed by Terraform user_data on the bootstrap EC2 instance.
+# If you created the instance before this change, either recreate the instance or install Docker manually.
 
-# Install Docker Compose (v2) - AL2023 may not have docker-compose-plugin in dnf
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64) COMPOSE_ARCH="x86_64" ;;
-  aarch64) COMPOSE_ARCH="aarch64" ;;
-  *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
-esac
-
-sudo mkdir -p /usr/local/lib/docker/cli-plugins
-sudo curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${COMPOSE_ARCH}" \
-  -o /usr/local/lib/docker/cli-plugins/docker-compose
-sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-
-# Verify compose is available
-docker compose version
+# Verify Docker + Compose are available
+sudo docker version
+sudo docker compose version
 
 # Clone the repository (so you can use docker-compose.yml)
 cd /home/ec2-user

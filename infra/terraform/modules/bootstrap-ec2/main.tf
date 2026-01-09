@@ -279,10 +279,26 @@ resource "aws_instance" "app" {
               set -euo pipefail
 
               dnf update -y
-              dnf install -y docker git unzip awscli docker-compose-plugin
+              dnf install -y docker git unzip awscli curl
 
               systemctl enable docker
               systemctl start docker
+
+              # Install Docker Compose v2 (AL2023 may not have docker-compose-plugin in dnf)
+              ARCH="$(uname -m)"
+              case "$ARCH" in
+                x86_64) COMPOSE_ARCH="x86_64" ;;
+                aarch64) COMPOSE_ARCH="aarch64" ;;
+                *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+              esac
+
+              mkdir -p /usr/local/lib/docker/cli-plugins
+              curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-${COMPOSE_ARCH}" \
+                -o /usr/local/lib/docker/cli-plugins/docker-compose
+              chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+              # Fail fast if compose isn't detected
+              /usr/bin/docker compose version
 
               # Ensure SSM agent is running (AL2023 typically has it installed)
               systemctl enable amazon-ssm-agent || true
