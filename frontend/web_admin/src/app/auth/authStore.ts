@@ -74,8 +74,7 @@ export const authStore = {
 
   isAuthorizedForAdmin(): boolean {
     const user = this.getUser();
-    const ctx = this.getAdminContext();
-    return !!user && (user.system_role === "ADMIN" || ctx?.identity.userType === "ADMIN");
+    return !!user && user.system_role === "ADMIN";
   },
 
   /**
