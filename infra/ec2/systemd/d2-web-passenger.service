@@ -1,0 +1,21 @@
+[Unit]
+Description=D2 Web Passenger (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/d2/apps/web_passenger/current
+EnvironmentFile=-/etc/d2/web_passenger.env
+Environment=PORT=3002
+ExecStart=/opt/d2/apps/web_passenger/current/node_modules/.bin/next start -p ${PORT}
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

@@ -199,7 +199,7 @@ resource "aws_cognito_user_pool_client" "web" {
 # RESOURCE: Cognito User Pool Client (Server / Backend)
 # ----------------------------------------------------------------------------
 resource "aws_cognito_user_pool_client" "server" {
-  name        = "${var.project}-${var.environment}-server-client"
+  name         = "${var.project}-${var.environment}-server-client"
   user_pool_id = aws_cognito_user_pool.main.id
 
   # Server-side client MAY have a secret (never exposed to browsers).

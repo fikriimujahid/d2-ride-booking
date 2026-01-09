@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ssm-rollback
+# Roll back one or more apps to the previous symlink and restart services.
+#
+# Usage:
+#   sudo /usr/local/bin/ssm-rollback [backend] [web_driver] [web_passenger]
+# If no args, rolls back all.
+
+BASE_DIR="/opt/d2/apps"
+
+apps=("${@:-backend web_driver web_passenger}")
+
+rollback_one() {
+  local app="$1"
+  local app_dir="$BASE_DIR/$app"
+
+  if [[ ! -L "$app_dir/previous" ]]; then
+    echo "No previous release for $app" >&2
+    return 1
+  fi
+
+  local prev
+  prev="$(readlink -f "$app_dir/previous")"
+  ln -sfn "$prev" "$app_dir/current"
+  echo "Rolled back $app -> $prev"
+}
+
+for app in "${apps[@]}"; do
+  rollback_one "$app" || true
+done
+
+systemctl restart d2-backend.service || true
+systemctl restart d2-web-driver.service || true
+systemctl restart d2-web-passenger.service || true
+
+echo "Rollback complete"

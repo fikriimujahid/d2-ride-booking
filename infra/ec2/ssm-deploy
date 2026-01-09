@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# ssm-deploy
+# Downloads backend + web (Next.js) artifacts from S3, installs deps, switches symlinks, restarts services.
+#
+# Usage:
+#   sudo /usr/local/bin/ssm-deploy <bucket> <release_id> <backend_key> <web_driver_key> <web_passenger_key>
+
+BUCKET="${1:?bucket required}"
+RELEASE_ID="${2:?release_id required}"
+BACKEND_KEY="${3:?backend_key required}"
+WEB_DRIVER_KEY="${4:?web_driver_key required}"
+WEB_PASSENGER_KEY="${5:?web_passenger_key required}"
+
+BASE_DIR="/opt/d2/apps"
+TMP_DIR="/tmp/d2-deploy-${RELEASE_ID}"
+
+mkdir -p "$TMP_DIR"
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 2; }
+}
+
+require_cmd aws
+require_cmd tar
+require_cmd npm
+require_cmd systemctl
+
+fetch_and_extract() {
+  local app="$1"
+  local key="$2"
+  local app_dir="$BASE_DIR/$app"
+  local rel_dir="$app_dir/releases/$RELEASE_ID"
+  local archive="$TMP_DIR/$app.tgz"
+
+  mkdir -p "$rel_dir"
+
+  echo "Downloading s3://$BUCKET/$key -> $archive"
+  aws s3 cp "s3://$BUCKET/$key" "$archive" --only-show-errors
+
+  echo "Extracting $app -> $rel_dir"
+  tar -xzf "$archive" -C "$rel_dir"
+}
+
+switch_symlink() {
+  local app="$1"
+  local app_dir="$BASE_DIR/$app"
+  local rel_dir="$app_dir/releases/$RELEASE_ID"
+
+  mkdir -p "$app_dir"
+
+  if [[ -L "$app_dir/current" ]]; then
+    local prev
+    prev="$(readlink -f "$app_dir/current")" || true
+    if [[ -n "${prev:-}" ]]; then
+      ln -sfn "$prev" "$app_dir/previous" || true
+    fi
+  fi
+
+  ln -sfn "$rel_dir" "$app_dir/current"
+}
+
+install_node_deps() {
+  local app="$1"
+  local wd="$BASE_DIR/$app/current"
+  echo "Installing production deps for $app"
+  (cd "$wd" && npm ci --omit=dev --no-audit --no-fund)
+}
+
+# 1) Fetch + extract
+mkdir -p "$BASE_DIR"
+fetch_and_extract backend "$BACKEND_KEY"
+fetch_and_extract web_driver "$WEB_DRIVER_KEY"
+fetch_and_extract web_passenger "$WEB_PASSENGER_KEY"
+
+# 2) Switch symlinks
+switch_symlink backend
+switch_symlink web_driver
+switch_symlink web_passenger
+
+# 3) Install deps
+install_node_deps backend
+install_node_deps web_driver
+install_node_deps web_passenger
+
+# 4) Restart services
+systemctl daemon-reload || true
+systemctl restart d2-backend.service
+systemctl restart d2-web-driver.service
+systemctl restart d2-web-passenger.service
+
+echo "Deploy complete: $RELEASE_ID"

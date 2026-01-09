@@ -3,6 +3,11 @@ output "bucket_name" {
   value       = aws_s3_bucket.site.bucket
 }
 
+output "bucket_arn" {
+  description = "S3 bucket ARN"
+  value       = aws_s3_bucket.site.arn
+}
+
 output "website_endpoint" {
   description = "S3 website endpoint (host only)"
   value       = aws_s3_bucket_website_configuration.site.website_endpoint

@@ -240,9 +240,9 @@ resource "aws_iam_role_policy" "bootstrap_access" {
         ]
       },
       {
-        Sid    = "ArtifactsAndLogsBucketList"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
+        Sid      = "ArtifactsAndLogsBucketList"
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
         Resource = aws_s3_bucket.bootstrap.arn
         Condition = {
           StringLike = {
@@ -449,40 +449,63 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "S3Artifacts"
-        Effect = "Allow"
-        Action = [
-          "s3:PutObject",
-          "s3:GetObject",
-          "s3:AbortMultipartUpload"
-        ]
-        Resource = "${aws_s3_bucket.bootstrap.arn}/artifacts/*"
-      },
-      {
-        Sid    = "S3List"
-        Effect = "Allow"
-        Action = ["s3:ListBucket"]
-        Resource = aws_s3_bucket.bootstrap.arn
-        Condition = {
-          StringLike = {
-            "s3:prefix" = ["artifacts/*"]
+    Statement = concat(
+      [
+        {
+          Sid    = "S3Artifacts"
+          Effect = "Allow"
+          Action = [
+            "s3:PutObject",
+            "s3:GetObject",
+            "s3:AbortMultipartUpload"
+          ]
+          Resource = "${aws_s3_bucket.bootstrap.arn}/artifacts/*"
+        },
+        {
+          Sid      = "S3List"
+          Effect   = "Allow"
+          Action   = ["s3:ListBucket"]
+          Resource = aws_s3_bucket.bootstrap.arn
+          Condition = {
+            StringLike = {
+              "s3:prefix" = ["artifacts/*"]
+            }
           }
         }
-      },
-      {
-        Sid    = "SSMDeploy"
-        Effect = "Allow"
-        Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation"
-        ]
-        Resource = [
-          "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/${aws_instance.app.id}",
-          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript"
-        ]
-      }
-    ]
+      ],
+      length(var.extra_deploy_s3_bucket_arns) > 0 ? [
+        {
+          Sid      = "S3StaticSites"
+          Effect   = "Allow"
+          Action   = ["s3:ListBucket"]
+          Resource = var.extra_deploy_s3_bucket_arns
+        },
+        {
+          Sid    = "S3StaticSitesObjects"
+          Effect = "Allow"
+          Action = [
+            "s3:PutObject",
+            "s3:DeleteObject",
+            "s3:GetObject",
+            "s3:AbortMultipartUpload"
+          ]
+          Resource = [for arn in var.extra_deploy_s3_bucket_arns : "${arn}/*"]
+        }
+      ] : [],
+      [
+        {
+          Sid    = "SSMDeploy"
+          Effect = "Allow"
+          Action = [
+            "ssm:SendCommand",
+            "ssm:GetCommandInvocation"
+          ]
+          Resource = [
+            "arn:aws:ec2:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:instance/${aws_instance.app.id}",
+            "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:document/AWS-RunShellScript"
+          ]
+        }
+      ]
+    )
   })
 }

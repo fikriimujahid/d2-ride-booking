@@ -122,3 +122,9 @@ variable "github_allowed_subs" {
   type        = list(string)
   default     = []
 }
+
+variable "extra_deploy_s3_bucket_arns" {
+  description = "Additional S3 bucket ARNs GitHub Actions deploy role may sync to (e.g., static site buckets)."
+  type        = list(string)
+  default     = []
+}

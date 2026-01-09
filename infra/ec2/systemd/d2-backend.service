@@ -1,0 +1,21 @@
+[Unit]
+Description=D2 Auth API (Fastify)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/d2/apps/backend/current
+EnvironmentFile=-/etc/d2/backend.env
+ExecStart=/usr/bin/node /opt/d2/apps/backend/current/dist/server.js
+Restart=always
+RestartSec=3
+
+# Hardening (reasonable defaults for Phase 0)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
