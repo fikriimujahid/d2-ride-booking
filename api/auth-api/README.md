@@ -56,6 +56,10 @@ User types are enforced in three ways:
 3. Admin-only Origin allowlist:
    - Admin auth endpoints require `Origin` to be in `ADMIN_WEB_ORIGINS`.
    - This does not replace JWT but adds a concrete server-side constraint for “Admin login only via Web Admin”.
+  - `ADMIN_WEB_ORIGINS` must contain the **frontend website origin(s)** (the exact value of the browser `Origin` header), not the backend host.
+    Examples:
+    - S3 static website: `http://d2-ride-booking-dev-admin-731099197523.s3-website-ap-southeast-1.amazonaws.com`
+    - Local dev: `http://localhost:5173`
 
 ### Token model
 
