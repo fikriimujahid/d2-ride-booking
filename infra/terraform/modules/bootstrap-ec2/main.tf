@@ -279,7 +279,9 @@ resource "aws_instance" "app" {
               set -euo pipefail
 
               dnf update -y
-              dnf install -y docker git unzip awscli curl
+              # NOTE: AL2023 commonly ships with curl-minimal. Installing full "curl" can
+              # conflict with curl-minimal unless you allow erasing packages.
+              dnf install -y docker git unzip awscli
 
               systemctl enable docker
               systemctl start docker

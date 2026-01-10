@@ -106,8 +106,32 @@ sudo docker compose version
 
 # Clone the repository (so you can use docker-compose.yml)
 cd /home/ec2-user
+
+# If the repo is PUBLIC:
 git clone https://github.com/fikriimujahid/d2-ride-booking
+
+# If the repo is PRIVATE, pick ONE option:
+#
+# Option A (recommended): SSH deploy key (read-only)
+# 1) Create an SSH key on EC2
+#    ssh-keygen -t ed25519 -f /home/ec2-user/.ssh/d2_repo -N ""
+# 2) Add the public key as a Deploy Key in GitHub:
+#    Repo → Settings → Deploy keys → Add deploy key (read-only)
+# 3) Clone using that key:
+#    GIT_SSH_COMMAND='ssh -i /home/ec2-user/.ssh/d2_repo -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' \
+#      git clone git@github.com:fikriimujahid/d2-ride-booking.git
+#
+# Option B: HTTPS + fine-scoped PAT (read-only)
+# - Create a PAT with minimal scopes (GitHub: fine-grained token → Repository contents: Read)
+# - Then clone (NOTE: token will appear in shell history if you paste it):
+#   git clone https://<TOKEN>@github.com/fikriimujahid/d2-ride-booking.git
+
 cd d2-ride-booking
+# Fetch all branches from origin
+git fetch origin
+
+# Switch to dev branch
+git checkout dev
 
 # Create .env for docker compose (used by docker-compose.yml)
 cat > .env <<'EOF'
