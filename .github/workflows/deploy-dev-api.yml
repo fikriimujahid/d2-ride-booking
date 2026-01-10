@@ -135,7 +135,7 @@ jobs:
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "d2 deploy dev backend ${RID}" \
-            --parameters "{\"commands\":[\"sudo /usr/local/bin/ssm-deploy ${BUCKET} ${RID} ${{ steps.s3.outputs.backend_key }} '' ''\"]}" \
+            --parameters "{\"commands\":[\"sudo /usr/local/bin/ssm-deploy ${BUCKET} ${RID} ${{ steps.s3.outputs.backend_key }} - -\"]}" \
             --timeout-seconds 1800 \
             --query 'Command.CommandId' \
             --output text)
