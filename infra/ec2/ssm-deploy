@@ -27,9 +27,20 @@ require_cmd tar
 require_cmd npm
 require_cmd systemctl
 
+normalize_key() {
+  local key="${1:-}"
+  key="${key//$'\r'/}"
+  key="${key#\"}"
+  key="${key%\"}"
+  key="${key#\'}"
+  key="${key%\'}"
+  printf '%s' "$key"
+}
+
 fetch_and_extract() {
   local app="$1"
-  local key="$2"
+  local key
+  key="$(normalize_key "${2:-}")"
   local app_dir="$BASE_DIR/$app"
   local rel_dir="$app_dir/releases/$RELEASE_ID"
   local archive="$TMP_DIR/$app.tgz"
@@ -44,8 +55,9 @@ fetch_and_extract() {
 }
 
 should_deploy() {
-  local key="$1"
-  [[ -n "${key:-}" && "$key" != "-" && "$key" != "skip" ]]
+  local key
+  key="$(normalize_key "${1:-}")"
+  [[ -n "$key" && "$key" != "-" && "$key" != "skip" ]]
 }
 
 switch_symlink() {

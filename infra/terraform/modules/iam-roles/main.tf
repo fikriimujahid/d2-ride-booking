@@ -620,21 +620,38 @@ resource "aws_iam_policy" "github_actions_deploy_policy" {
         Resource = "*"
       },
       {
-        Sid    = "SSMRunCommand"
+        Sid    = "SSMSendCommandToTaggedInstances"
         Effect = "Allow"
         Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation"
+          "ssm:SendCommand"
         ]
-        Resource = [
-          "arn:aws:ec2:*:*:instance/*",
-          "arn:aws:ssm:*:*:document/AWS-RunShellScript"
-        ]
+        Resource = "arn:aws:ec2:*:*:instance/*"
         Condition = {
           StringEquals = {
             "aws:ResourceTag/project" = var.project
           }
         }
+      },
+      {
+        Sid    = "SSMSendCommandDocument"
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand"
+        ]
+        Resource = [
+          "arn:aws:ssm:*::document/AWS-RunShellScript",
+          "arn:aws:ssm:*:*:document/AWS-RunShellScript"
+        ]
+      },
+      {
+        Sid    = "SSMGetCommandInvocation"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations",
+          "ssm:ListCommands"
+        ]
+        Resource = "*"
       }
     ]
   })
