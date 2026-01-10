@@ -7,8 +7,10 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/db/seed.ts",
+    "migrate:dev": "tsx src/db/migrate.ts",
+    "seed:dev": "tsx src/db/seed.ts",
+    "migrate": "node dist/db/migrate.js",
+    "seed": "node dist/db/seed.js",
     "lint": "node -e \"console.log('no-lint-config')\"",
     "test": "node --test test/*.test.mjs"
   },
