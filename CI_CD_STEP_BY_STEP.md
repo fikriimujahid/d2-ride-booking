@@ -294,8 +294,9 @@ sudo chown -R ec2-user:ec2-user /opt/d2
 ```bash
 # After the first deployment completes, you'll need to run migrations
 # SSH to EC2 and run:
-cd /opt/d2/apps/backend/current
-npm run migrate
+
+# Load runtime env (DATABASE_URL, etc). This file is root-only (chmod 600).
+sudo bash -lc 'set -a; source /etc/d2/backend.env; set +a; cd /opt/d2/apps/backend/current; npm run migrate'
 
 # This will create the initial database schema
 ```
@@ -938,3 +939,17 @@ sudo systemctl status d2-backend.service
 ---
 
 This document was generated on January 8, 2026 for the D2 Ride Booking CI/CD system.
+
+Backend (most likely source of INTERNAL_ERROR)
+
+Check service status: sudo systemctl status d2-backend.service --no-pager
+Last 200 log lines: sudo journalctl -u d2-backend.service -n 200 --no-pager
+Follow logs live while you reproduce: sudo journalctl -fu d2-backend.service
+If it’s coming from the web apps
+
+Driver UI: sudo journalctl -u d2-web-driver.service -n 200 --no-pager (or follow with -f)
+Passenger UI: sudo journalctl -u d2-web-passenger.service -n 200 --no-pager
+Database / Docker logs (if backend errors mention DB)
+
+Postgres container logs: sudo docker logs ridebooking-postgres --tail 200
+If you run redis too: sudo docker ps then sudo docker logs <redis-container> --tail 200

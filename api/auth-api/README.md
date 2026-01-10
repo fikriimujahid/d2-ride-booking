@@ -14,9 +14,11 @@ Key properties:
 
 1. `cp .env.example .env` and fill values.
 2. Install deps: `npm i`.
-3. Run migrations: `npm run migrate`.
-4. Seed initial users & RBAC: `npm run seed`.
+3. Run migrations (dev): `npm run migrate:dev`.
+4. Seed initial users & RBAC (dev): `npm run seed:dev`.
 4. Start dev server: `npm run dev`.
+
+Note: `npm run migrate` / `npm run seed` run the compiled scripts from `dist/` (intended for production deploys).
 
 ## Deliverables
 
