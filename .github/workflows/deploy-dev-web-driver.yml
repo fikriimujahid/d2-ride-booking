@@ -1,8 +1,8 @@
-name: Deploy (dev)
+name: Web Driver Deploy (dev)
 
 on:
   workflow_run:
-    workflows: ["CI (dev)"]
+    workflows: ["CI Web Driver (dev)"]
     branches: [dev]
     types: [completed]
 
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-dev
+  group: deploy-dev-web-driver
   cancel-in-progress: false
 
 jobs:
@@ -38,51 +38,35 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build backend
-        working-directory: api/auth-api
-        run: |
-          npm ci
-          npm run build
-
-      - name: Build web_admin
-        working-directory: frontend/web_admin
-        run: |
-          npm ci
-          npm run build
-
       - name: Build web_driver
         working-directory: frontend/web_driver
         run: |
           npm ci
           npm run build
 
-      - name: Build web_passenger
-        working-directory: frontend/web_passenger
-        run: |
-          npm ci
-          npm run build
-
-      - name: Package artifacts
+      - name: Package web_driver artifact
         shell: bash
         run: |
+          set -euo pipefail
           chmod +x infra/deploy/package-artifacts.sh
-          infra/deploy/package-artifacts.sh artifacts "${{ steps.meta.outputs.release_id }}"
+          infra/deploy/package-artifacts.sh artifacts "${{ steps.meta.outputs.release_id }}" web_driver
 
-      - name: Upload build artifacts
+      - name: Upload web_driver artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ steps.meta.outputs.release_id }}
-          path: artifacts/*.tgz
+          name: web_driver-${{ steps.meta.outputs.release_id }}
+          path: artifacts/web_driver-${{ steps.meta.outputs.release_id }}.tgz
           if-no-files-found: error
 
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
+    environment: dev
     steps:
-      - name: Download build artifacts
+      - name: Download web_driver artifact
         uses: actions/download-artifact@v4
         with:
-          name: release-${{ needs.build.outputs.release_id }}
+          name: web_driver-${{ needs.build.outputs.release_id }}
           path: artifacts
 
       - name: Configure AWS credentials (OIDC)
@@ -91,7 +75,7 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Upload artifacts to S3
+      - name: Upload web_driver artifact to S3
         id: s3
         shell: bash
         run: |
@@ -99,30 +83,12 @@ jobs:
           BUCKET="${{ secrets.DEPLOY_S3_BUCKET }}"
           RID="${{ needs.build.outputs.release_id }}"
 
-          backend_key="artifacts/dev/${RID}/backend.tgz"
           web_driver_key="artifacts/dev/${RID}/web_driver.tgz"
-          web_passenger_key="artifacts/dev/${RID}/web_passenger.tgz"
 
-          aws s3 cp "artifacts/backend-${RID}.tgz" "s3://${BUCKET}/${backend_key}" --only-show-errors
           aws s3 cp "artifacts/web_driver-${RID}.tgz" "s3://${BUCKET}/${web_driver_key}" --only-show-errors
-          aws s3 cp "artifacts/web_passenger-${RID}.tgz" "s3://${BUCKET}/${web_passenger_key}" --only-show-errors
 
           echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
-          echo "backend_key=${backend_key}" >> "$GITHUB_OUTPUT"
           echo "web_driver_key=${web_driver_key}" >> "$GITHUB_OUTPUT"
-          echo "web_passenger_key=${web_passenger_key}" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy Web Admin to S3 website bucket
-        shell: bash
-        run: |
-          set -euo pipefail
-          RID="${{ needs.build.outputs.release_id }}"
-          ADMIN_BUCKET="${{ secrets.WEB_ADMIN_S3_BUCKET }}"
-
-          # Unpack the web_admin artifact and sync the dist/ directory.
-          mkdir -p web_admin_unpack
-          tar -xzf "artifacts/web_admin-${RID}.tgz" -C web_admin_unpack
-          aws s3 sync "web_admin_unpack/dist" "s3://${ADMIN_BUCKET}/" --delete
 
       - name: Resolve target instance id
         id: instance
@@ -158,7 +124,7 @@ jobs:
 
           echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy via SSM Run Command
+      - name: Deploy web_driver via SSM Run Command
         id: ssm
         shell: bash
         run: |
@@ -171,8 +137,8 @@ jobs:
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --comment "d2 deploy dev ${RID}" \
-            --parameters commands="sudo /usr/local/bin/ssm-deploy '${BUCKET}' '${RID}' '${{ steps.s3.outputs.backend_key }}' '${{ steps.s3.outputs.web_driver_key }}' '${{ steps.s3.outputs.web_passenger_key }}'" \
+            --comment "d2 deploy dev web_driver ${RID}" \
+            --parameters commands="sudo /usr/local/bin/ssm-deploy '${BUCKET}' '${RID}' '-' '${{ steps.s3.outputs.web_driver_key }}' '-'" \
             --timeout-seconds 1800 \
             --query 'Command.CommandId' \
             --output text)
