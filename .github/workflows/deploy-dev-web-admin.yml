@@ -38,10 +38,17 @@ jobs:
       - name: Generate web_admin .env
         working-directory: frontend/web_admin
         shell: bash
+        env:
+          WEB_ADMIN_VITE_API_BASE_URL: ${{ vars.WEB_ADMIN_VITE_API_BASE_URL }}
+          WEB_ADMIN_VITE_API_BASE_URL_SECRET: ${{ secrets.WEB_ADMIN_VITE_API_BASE_URL }}
         run: |
           set -euo pipefail
-          # Prefer an explicit dev environment secret; fall back to a sensible default.
-          API_BASE_URL="${{ secrets.WEB_ADMIN_VITE_API_BASE_URL }}"
+          # Prefer an environment/repo variable; fall back to a secret.
+          API_BASE_URL="${WEB_ADMIN_VITE_API_BASE_URL:-${WEB_ADMIN_VITE_API_BASE_URL_SECRET:-}}"
+          if [ -z "${API_BASE_URL}" ]; then
+            echo "Missing WEB_ADMIN_VITE_API_BASE_URL (set as GitHub Actions variable or secret)." >&2
+            exit 1
+          fi
           printf "VITE_API_BASE_URL=%s\n" "${API_BASE_URL}" > .env
 
       - name: Build web_admin

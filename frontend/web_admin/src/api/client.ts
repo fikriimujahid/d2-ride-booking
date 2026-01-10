@@ -3,7 +3,9 @@ import { ApiError } from './types';
 import { authStore } from '../app/auth/authStore';
 import { authClient } from '../services/authClient';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+export const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
 function getAccessToken(): string | null {
   return authStore.getAccessToken();
