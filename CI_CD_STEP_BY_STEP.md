@@ -556,12 +556,7 @@ aws ec2 describe-instances --filters "Name=tag:project,Values=d2" ...
 aws ssm send-command \
   --instance-ids i-0abc123... \
   --document-name "AWS-RunShellScript" \
-  --parameters commands="sudo /usr/local/bin/ssm-deploy \
-    'd2-dev-123456789012-bootstrap' \
-    '<sha>' \
-    'artifacts/dev/<sha>/backend.tgz' \
-    'artifacts/dev/<sha>/web_driver.tgz' \
-    'artifacts/dev/<sha>/web_passenger.tgz'"
+  --parameters '{"commands":["sudo /usr/local/bin/ssm-deploy d2-dev-123456789012-bootstrap <sha> artifacts/dev/<sha>/backend.tgz artifacts/dev/<sha>/web_driver.tgz artifacts/dev/<sha>/web_passenger.tgz"]}'
 ```
 
 **This triggers the `ssm-deploy` script on EC2** ⬇️
