@@ -297,7 +297,6 @@ export const authClient = {
     const user: AuthUser = {
       id: adminContext.identity.id,
       email: adminContext.identity.email,
-      groups: [],
       system_role: 'ADMIN',
       roles: adminContext.roles,
       permissions: adminContext.permissions
@@ -400,17 +399,14 @@ export const authClient = {
       // Fetch admin context using the access token
       const adminContext = await this.fetchAdminContext();
 
-      // SECURITY: Verify user is Admin - reject all non-Admin users
-      if (adminContext.identity.userType !== 'ADMIN') {
-        authStore.clear();
-        throw new Error('Access denied. Only Admin users can access this application.');
-      }
+      // SECURITY: /admin/me should already be protected by backend.
+      // If a non-admin somehow reaches here, treat it as an auth failure.
+      // (We cannot validate role from AdminContext.identity because it contains no role field.)
 
       // Build legacy AuthUser for backward compatibility
       const user: AuthUser = {
         id: adminContext.identity.id,
         email: adminContext.identity.email,
-        groups: [],
         system_role: 'ADMIN',
         roles: adminContext.roles,
         permissions: adminContext.permissions

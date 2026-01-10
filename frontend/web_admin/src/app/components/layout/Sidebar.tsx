@@ -1,8 +1,7 @@
 import { useMemo, useState } from "react";
-import { LogOut } from "lucide-react";
+import { Car, LogOut } from "lucide-react";
 import { authStore } from "../../auth/authStore";
 import { getAuthorizedMenuItems } from "./menuConfig";
-import { Car } from "lucide-react";
 
 interface SidebarProps {
   activeModule: string;
@@ -47,9 +46,7 @@ export function Sidebar({ activeModule, onModuleChange, onLogout }: SidebarProps
   }, [displayName, displayEmail]);
 
   // Filter menu items based on user permissions
-  const authorizedMenuItems = useMemo(() => {
-    return getAuthorizedMenuItems((permission) => authStore.hasPermission(permission));
-  }, [adminContext?.permissions]);
+  const authorizedMenuItems = getAuthorizedMenuItems((permission) => authStore.hasPermission(permission));
 
   const handleLogout = async () => {
     if (isLoggingOut) return;
