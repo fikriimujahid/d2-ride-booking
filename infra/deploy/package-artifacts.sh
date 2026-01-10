@@ -8,6 +8,13 @@ ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT_DIR="${1:-$ROOT_DIR/artifacts}"
 RELEASE_ID="${2:-local}"
 
+shift 2 || true
+COMPONENTS=("$@")
+
+if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
+  COMPONENTS=(backend web_admin web_driver web_passenger)
+fi
+
 mkdir -p "$OUT_DIR"
 
 pack_backend() {
@@ -44,7 +51,28 @@ pack_next_app() {
   echo "$out"
 }
 
-echo "Backend: $(pack_backend)"
-echo "Web Admin: $(pack_web_admin)"
-echo "Web Driver: $(pack_next_app web_driver)"
-echo "Web Passenger: $(pack_next_app web_passenger)"
+pack_selected() {
+  local c
+  for c in "${COMPONENTS[@]}"; do
+    case "$c" in
+      backend)
+        echo "Backend: $(pack_backend)"
+        ;;
+      web_admin)
+        echo "Web Admin: $(pack_web_admin)"
+        ;;
+      web_driver)
+        echo "Web Driver: $(pack_next_app web_driver)"
+        ;;
+      web_passenger)
+        echo "Web Passenger: $(pack_next_app web_passenger)"
+        ;;
+      *)
+        echo "Unknown component '$c'. Expected: backend|web_admin|web_driver|web_passenger" >&2
+        exit 2
+        ;;
+    esac
+  done
+}
+
+pack_selected

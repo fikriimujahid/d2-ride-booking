@@ -9,9 +9,9 @@ set -euo pipefail
 
 BUCKET="${1:?bucket required}"
 RELEASE_ID="${2:?release_id required}"
-BACKEND_KEY="${3:?backend_key required}"
-WEB_DRIVER_KEY="${4:?web_driver_key required}"
-WEB_PASSENGER_KEY="${5:?web_passenger_key required}"
+BACKEND_KEY="${3:-}" 
+WEB_DRIVER_KEY="${4:-}"
+WEB_PASSENGER_KEY="${5:-}"
 
 BASE_DIR="/opt/d2/apps"
 TMP_DIR="/tmp/d2-deploy-${RELEASE_ID}"
@@ -43,6 +43,11 @@ fetch_and_extract() {
   tar -xzf "$archive" -C "$rel_dir"
 }
 
+should_deploy() {
+  local key="$1"
+  [[ -n "${key:-}" && "$key" != "-" && "$key" != "skip" ]]
+}
+
 switch_symlink() {
   local app="$1"
   local app_dir="$BASE_DIR/$app"
@@ -70,24 +75,58 @@ install_node_deps() {
 
 # 1) Fetch + extract
 mkdir -p "$BASE_DIR"
-fetch_and_extract backend "$BACKEND_KEY"
-fetch_and_extract web_driver "$WEB_DRIVER_KEY"
-fetch_and_extract web_passenger "$WEB_PASSENGER_KEY"
+
+if should_deploy "$BACKEND_KEY"; then
+  fetch_and_extract backend "$BACKEND_KEY"
+fi
+
+if should_deploy "$WEB_DRIVER_KEY"; then
+  fetch_and_extract web_driver "$WEB_DRIVER_KEY"
+fi
+
+if should_deploy "$WEB_PASSENGER_KEY"; then
+  fetch_and_extract web_passenger "$WEB_PASSENGER_KEY"
+fi
 
 # 2) Switch symlinks
-switch_symlink backend
-switch_symlink web_driver
-switch_symlink web_passenger
+if should_deploy "$BACKEND_KEY"; then
+  switch_symlink backend
+fi
+
+if should_deploy "$WEB_DRIVER_KEY"; then
+  switch_symlink web_driver
+fi
+
+if should_deploy "$WEB_PASSENGER_KEY"; then
+  switch_symlink web_passenger
+fi
 
 # 3) Install deps
-install_node_deps backend
-install_node_deps web_driver
-install_node_deps web_passenger
+if should_deploy "$BACKEND_KEY"; then
+  install_node_deps backend
+fi
+
+if should_deploy "$WEB_DRIVER_KEY"; then
+  install_node_deps web_driver
+fi
+
+if should_deploy "$WEB_PASSENGER_KEY"; then
+  install_node_deps web_passenger
+fi
 
 # 4) Restart services
 systemctl daemon-reload || true
-systemctl restart d2-backend.service
-systemctl restart d2-web-driver.service
-systemctl restart d2-web-passenger.service
+
+if should_deploy "$BACKEND_KEY"; then
+  systemctl restart d2-backend.service
+fi
+
+if should_deploy "$WEB_DRIVER_KEY"; then
+  systemctl restart d2-web-driver.service
+fi
+
+if should_deploy "$WEB_PASSENGER_KEY"; then
+  systemctl restart d2-web-passenger.service
+fi
 
 echo "Deploy complete: $RELEASE_ID"
