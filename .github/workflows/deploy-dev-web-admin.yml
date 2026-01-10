@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: dev
     outputs:
       release_id: ${{ steps.meta.outputs.release_id }}
     steps:
