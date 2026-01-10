@@ -1,37 +1,34 @@
 name: Web Driver Deploy (dev)
 
 on:
-  workflow_run:
-    workflows: ["CI Web Driver (dev)"]
+  push:
     branches: [dev]
-    types: [completed]
+    paths:
+      - frontend/web_driver/**
 
 permissions:
   id-token: write
   contents: read
 
 concurrency:
-  group: deploy-dev-web-driver
+  group: deploy-dev-ec2
   cancel-in-progress: false
 
 jobs:
   build:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       release_id: ${{ steps.meta.outputs.release_id }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Set release metadata
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          echo "release_id=${{ github.event.workflow_run.head_sha }}" >> "$GITHUB_OUTPUT"
+          echo "release_id=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
         uses: actions/setup-node@v4
