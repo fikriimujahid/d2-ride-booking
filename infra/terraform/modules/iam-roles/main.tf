@@ -610,6 +610,30 @@ resource "aws_iam_policy" "github_actions_deploy_policy" {
         }
       },
       {
+        Sid    = "S3StaticSiteAdminBuckets"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project}-*-admin-*"
+        ]
+      },
+      {
+        Sid    = "S3StaticSiteAdminObjects"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:AbortMultipartUpload"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project}-*-admin-*/*"
+        ]
+      },
+      {
         Sid    = "CloudWatchReadOnly"
         Effect = "Allow"
         Action = [
