@@ -4,11 +4,13 @@ import { emitAuthErrorEvent } from "../routing/authEvents";
 import { authClient } from "../../services/authClient";
 
 function getBaseUrl() {
-  const env = (import.meta as any).env as Record<string, string> | undefined;
+  const env = (import.meta as any).env as any;
   const baseUrl = env?.VITE_API_BASE_URL;
-  // Default to localhost for dev
-  if (!baseUrl) return "http://localhost:3000";
-  return baseUrl.replace(/\/$/, "");
+  if (baseUrl) return String(baseUrl).replace(/\/$/, "");
+  if (env?.DEV) return "http://localhost:3000";
+  // In deployed builds, never fall back to localhost.
+  // An empty base makes requests relative to the current origin.
+  return "";
 }
 
 export async function apiRequest<T>(
