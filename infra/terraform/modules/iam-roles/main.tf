@@ -584,6 +584,32 @@ resource "aws_iam_policy" "github_actions_deploy_policy" {
         ]
       },
       {
+        Sid    = "S3BootstrapArtifactsObjects"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:AbortMultipartUpload"
+        ]
+        Resource = "arn:aws:s3:::${var.project}-*-bootstrap/artifacts/*"
+      },
+      {
+        Sid    = "S3BootstrapArtifactsList"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket"
+        ]
+        Resource = "arn:aws:s3:::${var.project}-*-bootstrap"
+        Condition = {
+          StringLike = {
+            "s3:prefix" = [
+              "artifacts/*",
+              "artifacts"
+            ]
+          }
+        }
+      },
+      {
         Sid    = "CloudWatchReadOnly"
         Effect = "Allow"
         Action = [
