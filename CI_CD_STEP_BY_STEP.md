@@ -26,6 +26,7 @@ terraform apply
 
 2. **EC2 Instance** (your single Phase 0 server)
    - Amazon Linux 2023
+  - Instance type: `t3.small` (recommended for Node/Next deploys)
    - Elastic IP attached
    - Security group (ports 22/80/443/3000)
    - Instance profile with SSM permissions

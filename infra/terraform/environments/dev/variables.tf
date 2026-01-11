@@ -130,7 +130,7 @@ variable "instance_type_bastion" {
 variable "bootstrap_instance_type" {
   description = "Instance type for the single bootstrap EC2"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.small"
 }
 
 variable "bootstrap_enable_ssh" {

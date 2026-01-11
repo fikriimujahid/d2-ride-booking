@@ -16,6 +16,9 @@ WEB_PASSENGER_KEY="${5:-}"
 BASE_DIR="/opt/d2/apps"
 TMP_DIR="/tmp/d2-deploy-${RELEASE_ID}"
 
+# Persistent npm cache to speed up installs between releases
+NPM_CACHE_DIR="/opt/d2/npm-cache"
+
 mkdir -p "$TMP_DIR"
 
 require_cmd() {
@@ -26,6 +29,23 @@ require_cmd aws
 require_cmd tar
 require_cmd npm
 require_cmd systemctl
+
+print_stats() {
+  echo "--- host stats ---"
+  (command -v uptime >/dev/null 2>&1 && uptime) || true
+  (command -v free >/dev/null 2>&1 && free -m) || true
+  (command -v df >/dev/null 2>&1 && df -h) || true
+  echo "------------------"
+}
+
+run_with_optional_timeout() {
+  local minutes="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${minutes}m" "$@"
+  else
+    "$@"
+  fi
+}
 
 normalize_key() {
   local key="${1:-}"
@@ -78,15 +98,63 @@ switch_symlink() {
   ln -sfn "$rel_dir" "$app_dir/current"
 }
 
+deps_unchanged() {
+  local app="$1"
+  local app_dir="$BASE_DIR/$app"
+  local prev_dir=""
+  local prev_lock=""
+  local cur_lock="$app_dir/current/package-lock.json"
+
+  if [[ ! -f "$cur_lock" ]]; then
+    return 1
+  fi
+
+  if [[ -L "$app_dir/previous" ]]; then
+    prev_dir="$(readlink -f "$app_dir/previous")" || true
+  fi
+
+  if [[ -z "${prev_dir:-}" ]]; then
+    return 1
+  fi
+
+  prev_lock="$prev_dir/package-lock.json"
+  if [[ ! -f "$prev_lock" ]]; then
+    return 1
+  fi
+
+  cmp -s "$prev_lock" "$cur_lock"
+}
+
 install_node_deps() {
   local app="$1"
   local wd="$BASE_DIR/$app/current"
+
+  if deps_unchanged "$app" && [[ -d "$BASE_DIR/$app/previous/node_modules" ]]; then
+    echo "Dependencies unchanged for $app; reusing previous node_modules"
+    rm -rf "$wd/node_modules" || true
+    cp -a "$BASE_DIR/$app/previous/node_modules" "$wd/node_modules"
+    return 0
+  fi
+
   echo "Installing production deps for $app"
-  (cd "$wd" && npm ci --omit=dev --no-audit --no-fund)
+
+  mkdir -p "$NPM_CACHE_DIR" || true
+  export NPM_CONFIG_CACHE="$NPM_CACHE_DIR"
+
+  # Keep the box responsive on small instances.
+  local node_opts="${NODE_OPTIONS:---max_old_space_size=768}"
+
+  if command -v nice >/dev/null 2>&1; then
+    (cd "$wd" && run_with_optional_timeout 20 nice -n 10 env NODE_OPTIONS="$node_opts" npm ci --omit=dev --no-audit --no-fund --progress=false)
+  else
+    (cd "$wd" && run_with_optional_timeout 20 env NODE_OPTIONS="$node_opts" npm ci --omit=dev --no-audit --no-fund --progress=false)
+  fi
 }
 
 # 1) Fetch + extract
 mkdir -p "$BASE_DIR"
+
+print_stats
 
 if should_deploy "$BACKEND_KEY"; then
   fetch_and_extract backend "$BACKEND_KEY"
