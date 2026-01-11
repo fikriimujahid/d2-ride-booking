@@ -54,8 +54,21 @@ export async function buildApp(): Promise<FastifyInstance> {
         return;
       }
 
-      // Parse allowed origins from config
       const allowedOrigins = config.adminWebOrigins || [];
+
+      const normalize = (value: string): { origin?: string; host?: string } => {
+        const trimmed = value.trim().replace(/\/+$/g, '');
+        try {
+          const url = new URL(trimmed);
+          return { origin: url.origin, host: url.host.toLowerCase() };
+        } catch {
+          // Allow legacy host[:port] entries in env; compare against Origin host.
+          const hostOnly = trimmed.replace(/^https?:\/\//i, '').split('/')[0];
+          return { host: hostOnly.toLowerCase() };
+        }
+      };
+
+      const reqOrigin = normalize(origin);
       
       // Allow any localhost/127.0.0.1 in development
       if (config.nodeEnv === 'development' && 
@@ -64,14 +77,26 @@ export async function buildApp(): Promise<FastifyInstance> {
         return;
       }
 
-      // Check if origin is in allowlist
-      if (allowedOrigins.includes(origin)) {
+      // Check if origin is in allowlist (canonical origin match, or host-only match)
+      const allowed = allowedOrigins.some((entry) => {
+        const allowedEntry = normalize(entry);
+        if (allowedEntry.origin && reqOrigin.origin) {
+          return allowedEntry.origin === reqOrigin.origin;
+        }
+        if (allowedEntry.host && reqOrigin.host) {
+          return allowedEntry.host === reqOrigin.host;
+        }
+        return false;
+      });
+
+      if (allowed) {
         callback(null, true);
         return;
       }
 
       // Reject
-      callback(new Error('Not allowed by CORS'), false);
+      const err = Object.assign(new Error('Not allowed by CORS'), { statusCode: 403 });
+      callback(err, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],

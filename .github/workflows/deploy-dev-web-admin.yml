@@ -17,6 +17,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: dev
     outputs:
       release_id: ${{ steps.meta.outputs.release_id }}
     steps:
@@ -34,6 +35,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Generate web_admin .env
+        working-directory: frontend/web_admin
+        shell: bash
+        env:
+          WEB_ADMIN_VITE_API_BASE_URL: ${{ vars.WEB_ADMIN_VITE_API_BASE_URL }}
+          WEB_ADMIN_VITE_API_BASE_URL_SECRET: ${{ secrets.WEB_ADMIN_VITE_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          # Prefer an environment/repo variable; fall back to a secret.
+          API_BASE_URL="${WEB_ADMIN_VITE_API_BASE_URL:-${WEB_ADMIN_VITE_API_BASE_URL_SECRET:-}}"
+          if [ -z "${API_BASE_URL}" ]; then
+            echo "Missing WEB_ADMIN_VITE_API_BASE_URL (set as GitHub Actions variable or secret)." >&2
+            exit 1
+          fi
+          printf "VITE_API_BASE_URL=%s\n" "${API_BASE_URL}" > .env
 
       - name: Build web_admin
         working-directory: frontend/web_admin
