@@ -108,8 +108,11 @@ module "bootstrap" {
   github_repo              = var.github_repo
   github_allowed_subs      = var.github_allowed_subs
 
-  # Allow GitHub Actions to sync the Web Admin static site bucket.
-  extra_deploy_s3_bucket_arns = [module.frontend_admin.bucket_arn]
+  # Allow GitHub Actions to sync the public static site buckets.
+  extra_deploy_s3_bucket_arns = [
+    module.frontend_admin.bucket_arn,
+    module.frontend_driver.bucket_arn,
+  ]
 }
 
 # ============================================================================
@@ -124,6 +127,16 @@ module "frontend_admin" {
   tags        = local.common_tags
 
   site_name = "admin"
+}
+
+module "frontend_driver" {
+  source = "../../modules/static-site-s3"
+
+  project     = var.project
+  environment = var.environment
+  tags        = local.common_tags
+
+  site_name = "driver"
 }
 
 # ============================================================================
