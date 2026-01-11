@@ -634,6 +634,30 @@ resource "aws_iam_policy" "github_actions_deploy_policy" {
         ]
       },
       {
+        Sid    = "S3StaticSiteDriverBuckets"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+          "s3:GetBucketLocation"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project}-*-driver-*"
+        ]
+      },
+      {
+        Sid    = "S3StaticSiteDriverObjects"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:DeleteObject",
+          "s3:AbortMultipartUpload"
+        ]
+        Resource = [
+          "arn:aws:s3:::${var.project}-*-driver-*/*"
+        ]
+      },
+      {
         Sid    = "CloudWatchReadOnly"
         Effect = "Allow"
         Action = [
