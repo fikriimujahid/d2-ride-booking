@@ -271,13 +271,26 @@ EOF
 # Web Driver env file
 sudo tee /etc/d2/web_driver.env > /dev/null <<'EOF'
 NODE_ENV=production
-NEXT_PUBLIC_API_URL=http://54.123.45.67:3000
+# Driver app calls the auth API directly from the browser.
+# This MUST be set at build time (NEXT_PUBLIC_*).
+NEXT_PUBLIC_AUTH_API_BASE_URL=http://54.123.45.67:3000
+# Server-side calls (Next.js route handlers / SSR)
+AUTH_API_BASE_URL=http://127.0.0.1:3000
 EOF
 
 # Web Passenger env file
 sudo tee /etc/d2/web_passenger.env > /dev/null <<'EOF'
 NODE_ENV=production
-NEXT_PUBLIC_API_URL=http://54.123.45.67:3000
+# Passenger app uses Next.js API routes ("BFF") like /api/auth/login.
+# Those server routes call the backend auth API using AUTH_API_BASE_URL.
+AUTH_API_BASE_URL=http://127.0.0.1:3000
+
+# IMPORTANT (HTTP vs HTTPS):
+# In production, the passenger app sets httpOnly auth cookies.
+# If you serve the passenger site over plain HTTP (no TLS) and NODE_ENV=production,
+# Secure cookies will NOT be stored by the browser and login will not stick.
+# For HTTP-only setups, set COOKIE_SECURE=false. For real production, use HTTPS and remove this.
+COOKIE_SECURE=false
 EOF
 
 # Secure the files (readable only by root)

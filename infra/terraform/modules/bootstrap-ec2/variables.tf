@@ -75,6 +75,17 @@ variable "app_port" {
   default     = 3000
 }
 
+variable "extra_app_ports" {
+  description = "Additional TCP ports to expose on the bootstrap instance (e.g., Next.js apps on 3001/3002). Uses the same allowed_app_cidrs gating as app_port."
+  type        = list(number)
+  default     = []
+
+  validation {
+    condition     = alltrue([for p in var.extra_app_ports : p >= 1 && p <= 65535])
+    error_message = "extra_app_ports must contain valid TCP port numbers (1-65535)."
+  }
+}
+
 variable "allowed_app_cidrs" {
   description = "CIDR blocks allowed to reach app_port. If empty and enable_ssh=true, defaults to ssh_admin_cidrs."
   type        = list(string)
