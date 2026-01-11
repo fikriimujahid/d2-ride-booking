@@ -156,3 +156,9 @@ variable "bootstrap_allowed_app_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "bootstrap_extra_app_ports" {
+  description = "Extra TCP ports to expose on the bootstrap instance (dev-only convenience; e.g., web_driver=3001, web_passenger=3002)."
+  type        = list(number)
+  default     = [3001, 3002]
+}

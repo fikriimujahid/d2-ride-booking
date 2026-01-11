@@ -11,6 +11,16 @@ function isProd() {
   return process.env.NODE_ENV === "production"
 }
 
+function cookieSecure() {
+  const override = process.env.COOKIE_SECURE
+  if (override != null) {
+    const normalized = override.trim().toLowerCase()
+    return normalized === "1" || normalized === "true" || normalized === "yes"
+  }
+
+  return isProd()
+}
+
 export async function setAuthCookies(tokens: TokenPair) {
   const store = await cookies()
 
@@ -26,7 +36,7 @@ export async function setAuthCookies(tokens: TokenPair) {
 
   store.set(AUTH_COOKIES.accessToken, tokens.accessToken, {
     httpOnly: true,
-    secure: isProd(),
+    secure: cookieSecure(),
     sameSite: "lax",
     path: "/",
     maxAge: accessMaxAge,
@@ -34,7 +44,7 @@ export async function setAuthCookies(tokens: TokenPair) {
 
   store.set(AUTH_COOKIES.refreshToken, tokens.refreshToken, {
     httpOnly: true,
-    secure: isProd(),
+    secure: cookieSecure(),
     sameSite: "lax",
     path: "/",
     maxAge: 30 * 24 * 60 * 60,
@@ -45,14 +55,14 @@ export async function clearAuthCookies() {
   const store = await cookies()
   store.set(AUTH_COOKIES.accessToken, "", {
     httpOnly: true,
-    secure: isProd(),
+    secure: cookieSecure(),
     sameSite: "lax",
     path: "/",
     maxAge: 0,
   })
   store.set(AUTH_COOKIES.refreshToken, "", {
     httpOnly: true,
-    secure: isProd(),
+    secure: cookieSecure(),
     sameSite: "lax",
     path: "/",
     maxAge: 0,

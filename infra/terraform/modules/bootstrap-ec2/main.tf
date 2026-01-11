@@ -96,6 +96,17 @@ resource "aws_security_group" "app" {
   }
 
   dynamic "ingress" {
+    for_each = length(local.app_cidrs_effective) > 0 ? var.extra_app_ports : []
+    content {
+      description = "App (extra)"
+      from_port   = ingress.value
+      to_port     = ingress.value
+      protocol    = "tcp"
+      cidr_blocks = local.app_cidrs_effective
+    }
+  }
+
+  dynamic "ingress" {
     for_each = length(var.allowed_http_cidrs) > 0 ? [1] : []
     content {
       description = "HTTP"

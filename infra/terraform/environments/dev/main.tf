@@ -103,6 +103,7 @@ module "bootstrap" {
   ssh_admin_cidrs = var.bootstrap_ssh_admin_cidrs
 
   allowed_app_cidrs = var.bootstrap_allowed_app_cidrs
+  extra_app_ports   = var.bootstrap_extra_app_ports
 
   github_oidc_provider_arn = var.github_oidc_provider_arn
   github_repo              = var.github_repo
