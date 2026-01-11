@@ -22,17 +22,97 @@ async function parseResponseBody(res: Response) {
   return res.text().catch(() => null);
 }
 
-export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
-  const url = path.startsWith('/') ? `/api/backend${path}` : `/api/backend/${path}`;
+function getApiBaseUrl() {
+  const raw = process.env.NEXT_PUBLIC_AUTH_API_BASE_URL;
+  if (!raw) {
+    throw new Error(
+      'Missing NEXT_PUBLIC_AUTH_API_BASE_URL (e.g. https://api.example.com). This must be set at build time.'
+    );
+  }
+  return raw.replace(/\/$/, '');
+}
 
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      ...(init.headers ?? {}),
-      // Ensure we default to JSON when sending bodies.
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-    },
+function buildApiUrl(path: string) {
+  const base = getApiBaseUrl();
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${normalized}`;
+}
+
+function getStoredTokens(): { accessToken: string; refreshToken: string; expiresAt: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem('d2_driver_tokens');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.accessToken || !parsed?.refreshToken || !parsed?.expiresAt) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshOnce(): Promise<boolean> {
+  const tokens = getStoredTokens();
+  if (!tokens?.refreshToken) return false;
+
+  const res = await fetch(`${getApiBaseUrl()}/driver/auth/refresh`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: tokens.refreshToken }),
   });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.accessToken || !data?.refreshToken) {
+    try {
+      window.localStorage.removeItem('d2_driver_tokens');
+    } catch {
+      // ignore
+    }
+    return false;
+  }
+
+  try {
+    window.localStorage.setItem('d2_driver_tokens', JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+  try {
+    const next = window.location.pathname || '/app';
+    window.location.assign(`/login/?next=${encodeURIComponent(next)}`);
+  } catch {
+    // ignore
+  }
+}
+
+async function doFetch(url: string, init: ApiFetchInit) {
+  const tokens = getStoredTokens();
+  const headers = new Headers(init.headers ?? {});
+
+  // Ensure we default to JSON when sending bodies.
+  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+
+  if (tokens?.accessToken && init.auth !== false) {
+    headers.set('Authorization', `Bearer ${tokens.accessToken}`);
+  }
+
+  return fetch(url, { ...init, headers });
+}
+
+export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promise<T> {
+  const url = buildApiUrl(path);
+
+  let res = await doFetch(url, init);
+
+  // Try refresh once on 401 and retry.
+  if (res.status === 401 && typeof window !== 'undefined') {
+    const refreshed = await refreshOnce();
+    if (refreshed) res = await doFetch(url, init);
+  }
 
   if (res.ok) return (await parseResponseBody(res)) as T;
 
@@ -43,17 +123,14 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
     (typeof body === 'string' ? body : `Request failed (${res.status})`);
 
   if (res.status === 401) {
-    // Centralized/global 401 handling for client-side requests.
-    // Server-side rendering is protected via middleware + backend auth enforcement.
+    // Centralized/global 401 handling for static site.
     if (typeof window !== 'undefined') {
       try {
-        await fetch('/api/auth/logout', { method: 'POST' });
+        window.localStorage.removeItem('d2_driver_tokens');
       } catch {
         // ignore
       }
-      // Preserve a minimal return path; avoid leaking query string content.
-      const next = window.location.pathname || '/app';
-      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+      redirectToLogin();
     }
     throw new AuthError(message, 401, body);
   }

@@ -46,3 +46,13 @@ output "frontend_admin_bucket_name" {
   description = "Admin frontend S3 bucket name"
   value       = module.frontend_admin.bucket_name
 }
+
+output "frontend_driver_website_url" {
+  description = "Driver frontend public S3 website URL (HTTP)"
+  value       = module.frontend_driver.website_url
+}
+
+output "frontend_driver_bucket_name" {
+  description = "Driver frontend S3 bucket name"
+  value       = module.frontend_driver.bucket_name
+}

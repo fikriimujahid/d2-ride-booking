@@ -11,12 +11,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-dev-ec2
+  # Previously shared the same concurrency group as EC2 deploy workflows.
+  # Since web_driver is no longer deployed to EC2 from this workflow,
+  # keep a dedicated group to avoid blocking unrelated deploys.
+  # group: deploy-dev-ec2
+  group: deploy-dev-web-driver
   cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment: dev
     outputs:
       release_id: ${{ steps.meta.outputs.release_id }}
     steps:
@@ -35,6 +40,22 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Generate web_driver .env.production
+        working-directory: frontend/web_driver
+        shell: bash
+        env:
+          WEB_DRIVER_AUTH_API_BASE_URL: ${{ vars.NEXT_PUBLIC_AUTH_API_BASE_URL }}
+          WEB_DRIVER_AUTH_API_BASE_URL_SECRET: ${{ secrets.NEXT_PUBLIC_AUTH_API_BASE_URL }}
+        run: |
+          set -euo pipefail
+          # Prefer an environment/repo variable; fall back to a secret.
+          API_BASE_URL="${WEB_DRIVER_AUTH_API_BASE_URL:-${WEB_DRIVER_AUTH_API_BASE_URL_SECRET:-}}"
+          if [ -z "${API_BASE_URL}" ]; then
+            echo "Missing NEXT_PUBLIC_AUTH_API_BASE_URL (set as GitHub Actions variable or secret)." >&2
+            exit 1
+          fi
+          printf "NEXT_PUBLIC_AUTH_API_BASE_URL=%s\n" "${API_BASE_URL}" > .env.production
+
       - name: Build web_driver
         working-directory: frontend/web_driver
         run: |
@@ -45,8 +66,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          chmod +x infra/deploy/package-artifacts.sh
-          infra/deploy/package-artifacts.sh artifacts "${{ steps.meta.outputs.release_id }}" web_driver
+          RID="${{ steps.meta.outputs.release_id }}"
+          mkdir -p artifacts
+          # Next.js static export emits frontend/web_driver/out
+          tar -czf "artifacts/web_driver-${RID}.tgz" -C frontend/web_driver out
 
       - name: Upload web_driver artifact
         uses: actions/upload-artifact@v4
@@ -87,76 +110,91 @@ jobs:
           echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
           echo "web_driver_key=${web_driver_key}" >> "$GITHUB_OUTPUT"
 
-      - name: Resolve target instance id
-        id: instance
+      - name: Deploy web_driver to S3 website bucket
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ -n "${{ secrets.EC2_INSTANCE_ID }}" ]]; then
-            echo "instance_id=${{ secrets.EC2_INSTANCE_ID }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          PROJECT_TAG="${{ secrets.EC2_TAG_PROJECT }}"
-          ENV_TAG="${{ secrets.EC2_TAG_ENVIRONMENT }}"
-
-          if [[ -z "${PROJECT_TAG}" || -z "${ENV_TAG}" ]]; then
-            echo "Set either EC2_INSTANCE_ID or both EC2_TAG_PROJECT + EC2_TAG_ENVIRONMENT in GitHub Environment 'dev'." >&2
-            exit 1
-          fi
-
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters \
-              "Name=tag:project,Values=${PROJECT_TAG}" \
-              "Name=tag:environment,Values=${ENV_TAG}" \
-              "Name=instance-state-name,Values=running" \
-            --query 'Reservations[0].Instances[0].InstanceId' \
-            --output text)
-
-          if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
-            echo "No running instance found for project/environment tags" >&2
-            exit 1
-          fi
-
-          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy web_driver via SSM Run Command
-        id: ssm
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          INSTANCE_ID="${{ steps.instance.outputs.instance_id }}"
-          BUCKET="${{ steps.s3.outputs.bucket }}"
           RID="${{ needs.build.outputs.release_id }}"
+          DRIVER_BUCKET="${{ secrets.WEB_DRIVER_S3_BUCKET }}"
 
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --comment "d2 deploy dev web_driver ${RID}" \
-            --parameters "{\"commands\":[\"sudo /usr/local/bin/ssm-deploy ${BUCKET} ${RID} - ${{ steps.s3.outputs.web_driver_key }} -\"]}" \
-            --timeout-seconds 1800 \
-            --query 'Command.CommandId' \
-            --output text)
+          mkdir -p web_driver_unpack
+          tar -xzf "artifacts/web_driver-${RID}.tgz" -C web_driver_unpack
+          aws s3 sync "web_driver_unpack/out" "s3://${DRIVER_BUCKET}/" --delete
 
-          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for SSM command
-        shell: bash
-        run: |
-          set -euo pipefail
-          aws ssm wait command-executed \
-            --command-id "${{ steps.ssm.outputs.command_id }}" \
-            --instance-id "${{ steps.instance.outputs.instance_id }}"
-
-      - name: Show SSM output
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          aws ssm get-command-invocation \
-            --command-id "${{ steps.ssm.outputs.command_id }}" \
-            --instance-id "${{ steps.instance.outputs.instance_id }}" \
-            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
-            --output json
+      # --- EC2/SSM deployment (disabled) ------------------------------------
+      # web_driver is no longer deployed to EC2 by this workflow.
+      # The artifact upload above is the final step for web_driver deployment.
+      #
+      # - name: Resolve target instance id
+      #   id: instance
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #
+      #     if [[ -n "${{ secrets.EC2_INSTANCE_ID }}" ]]; then
+      #       echo "instance_id=${{ secrets.EC2_INSTANCE_ID }}" >> "$GITHUB_OUTPUT"
+      #       exit 0
+      #     fi
+      #
+      #     PROJECT_TAG="${{ secrets.EC2_TAG_PROJECT }}"
+      #     ENV_TAG="${{ secrets.EC2_TAG_ENVIRONMENT }}"
+      #
+      #     if [[ -z "${PROJECT_TAG}" || -z "${ENV_TAG}" ]]; then
+      #       echo "Set either EC2_INSTANCE_ID or both EC2_TAG_PROJECT + EC2_TAG_ENVIRONMENT in GitHub Environment 'dev'." >&2
+      #       exit 1
+      #     fi
+      #
+      #     INSTANCE_ID=$(aws ec2 describe-instances \
+      #       --filters \
+      #         "Name=tag:project,Values=${PROJECT_TAG}" \
+      #         "Name=tag:environment,Values=${ENV_TAG}" \
+      #         "Name=instance-state-name,Values=running" \
+      #       --query 'Reservations[0].Instances[0].InstanceId' \
+      #       --output text)
+      #
+      #     if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
+      #       echo "No running instance found for project/environment tags" >&2
+      #       exit 1
+      #     fi
+      #
+      #     echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+      #
+      # - name: Deploy web_driver via SSM Run Command
+      #   id: ssm
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #
+      #     INSTANCE_ID="${{ steps.instance.outputs.instance_id }}"
+      #     BUCKET="${{ steps.s3.outputs.bucket }}"
+      #     RID="${{ needs.build.outputs.release_id }}"
+      #
+      #     CMD_ID=$(aws ssm send-command \
+      #       --instance-ids "$INSTANCE_ID" \
+      #       --document-name "AWS-RunShellScript" \
+      #       --comment "d2 deploy dev web_driver ${RID}" \
+      #       --parameters "{\"commands\":[\"sudo /usr/local/bin/ssm-deploy ${BUCKET} ${RID} - ${{ steps.s3.outputs.web_driver_key }} -\"]}" \
+      #       --timeout-seconds 1800 \
+      #       --query 'Command.CommandId' \
+      #       --output text)
+      #
+      #     echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+      #
+      # - name: Wait for SSM command
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     aws ssm wait command-executed \
+      #       --command-id "${{ steps.ssm.outputs.command_id }}" \
+      #       --instance-id "${{ steps.instance.outputs.instance_id }}"
+      #
+      # - name: Show SSM output
+      #   if: always()
+      #   shell: bash
+      #   run: |
+      #     set -euo pipefail
+      #     aws ssm get-command-invocation \
+      #       --command-id "${{ steps.ssm.outputs.command_id }}" \
+      #       --instance-id "${{ steps.instance.outputs.instance_id }}" \
+      #       --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+      #       --output json
