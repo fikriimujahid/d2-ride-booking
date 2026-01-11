@@ -3,15 +3,43 @@
 import type React from "react"
 
 import { DashboardSidebar } from "@/components/dashboard-sidebar"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Menu } from "lucide-react"
+import { usePathname, useRouter } from "next/navigation"
+import { getSession } from "@/lib/auth/client"
 
 export default function ClientDashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const [authChecked, setAuthChecked] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+
+    ;(async () => {
+      const session = await getSession()
+      if (!session.authenticated) {
+        router.replace(`/login/?next=${encodeURIComponent(pathname || "/app")}`)
+        return
+      }
+
+      if (mounted) setAuthChecked(true)
+    })().catch(() => {
+      router.replace(`/login/?next=${encodeURIComponent(pathname || "/app")}`)
+    })
+
+    return () => {
+      mounted = false
+    }
+  }, [router, pathname])
+
+  if (!authChecked) return null
 
   return (
     <div className="flex h-screen">
