@@ -1,12 +1,14 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { loadConfig } from './config.js';
 import { createDbPool } from './db/pool.js';
+import { createRedisClient } from './redis/client.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerCors } from './plugins/cors.js';
 import { registerAuthContext } from './plugins/authContext.js';
 import { registerPassengerRoutes } from './modules/passenger/routes.js';
 import { registerDriverRoutes } from './modules/driver/routes.js';
 import { registerRideRoutes } from './modules/ride/routes.js';
+import { startOfferReaper } from './modules/matching/offerReaper.js';
 
 type AjvLike = {
   addKeyword(name: string): void;
@@ -51,6 +53,15 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   app.decorate('config', config);
   app.decorate('db', createDbPool(config.databaseUrl));
+  app.decorate('redis', await createRedisClient(config.redisUrl));
+
+  app.addHook('onClose', async (instance) => {
+    try {
+      await instance.redis.quit();
+    } catch {
+      // ignore close errors
+    }
+  });
 
   await registerCors(app);
   await registerSwagger(app);
@@ -77,6 +88,8 @@ export async function buildApp(): Promise<FastifyInstance> {
   await registerDriverRoutes(app);
   await registerRideRoutes(app);
 
+  startOfferReaper(app, config.matchOfferReaperIntervalMs);
+
   return app;
 }
 
@@ -84,5 +97,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     config: ReturnType<typeof loadConfig>;
     db: ReturnType<typeof createDbPool>;
+    redis: Awaited<ReturnType<typeof createRedisClient>>;
   }
 }

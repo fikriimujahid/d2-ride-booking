@@ -3,6 +3,7 @@ export type HttpErrorCode =
   | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'CONFLICT'
+  | 'TIMEOUT'
   | 'VALIDATION_ERROR'
   | 'INTERNAL_ERROR';
 

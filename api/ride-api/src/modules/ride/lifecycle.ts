@@ -1,5 +1,6 @@
 export type RideStatus =
   | 'requested'
+  | 'offered'
   | 'accepted'
   | 'arrived'
   | 'in_progress'
@@ -13,6 +14,11 @@ export type TransitionDecision =
 
 export function decideAccept(status: RideStatus, currentDriverId: string | null, requestedDriverId: string): TransitionDecision {
   if (status === 'requested' && currentDriverId === null) return { kind: 'apply' };
+
+  if (status === 'offered') {
+    if (currentDriverId === requestedDriverId) return { kind: 'apply' };
+    return { kind: 'conflict', message: 'Ride is offered to another driver' };
+  }
 
   if (status === 'accepted') {
     if (currentDriverId === requestedDriverId) return { kind: 'idempotent' };
@@ -28,7 +34,7 @@ export function decideAccept(status: RideStatus, currentDriverId: string | null,
 
 export function decideCancel(status: RideStatus): TransitionDecision {
   if (status === 'cancelled') return { kind: 'idempotent' };
-  if (status === 'requested' || status === 'accepted' || status === 'arrived') return { kind: 'apply' };
+  if (status === 'requested' || status === 'offered' || status === 'accepted' || status === 'arrived') return { kind: 'apply' };
   if (status === 'completed') return { kind: 'conflict', message: 'Ride is completed' };
   return { kind: 'conflict', message: 'Ride cannot be cancelled in current state' };
 }
