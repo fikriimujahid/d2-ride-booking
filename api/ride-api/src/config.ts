@@ -9,6 +9,9 @@ const EnvSchema = z.object({
 
   REDIS_URL: z.string().default('redis://localhost:6379'),
 
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
+  GOOGLE_MAPS_TIMEOUT_MS: z.coerce.number().int().positive().default(2000),
+
   MATCH_OFFER_REAPER_INTERVAL_MS: z.coerce.number().int().positive().default(5000),
 
   // Auth context is intentionally abstracted. In dev, we can use headers.
@@ -23,6 +26,8 @@ export function loadConfig(env: NodeJS.ProcessEnv) {
     logLevel: parsed.LOG_LEVEL,
     databaseUrl: parsed.DATABASE_URL,
     redisUrl: parsed.REDIS_URL,
+    googleMapsApiKey: parsed.GOOGLE_MAPS_API_KEY,
+    googleMapsTimeoutMs: parsed.GOOGLE_MAPS_TIMEOUT_MS,
     matchOfferReaperIntervalMs: parsed.MATCH_OFFER_REAPER_INTERVAL_MS,
     authContextMode: parsed.AUTH_CONTEXT_MODE,
     port: parsed.PORT ? Number(parsed.PORT) : undefined
