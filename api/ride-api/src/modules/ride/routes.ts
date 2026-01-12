@@ -1,6 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { httpError } from '../../util/httpErrors.js';
 import { requireAuth, requireRole } from '../../plugins/authContext.js';
+import { withTx } from '../../db/tx.js';
+import {
+  decideAccept,
+  decideArrive,
+  decideCancel,
+  decideComplete,
+  decideStart,
+  type RideStatus
+} from './lifecycle.js';
 
 type Location = {
   lat: number;
@@ -144,37 +153,65 @@ export async function registerRideRoutes(app: FastifyInstance) {
     const auth = requireRole(req, 'driver');
     const { rideId } = req.params as { rideId: string };
 
-    const driver = await app.db.query<{ id: string; is_available: boolean }>(
-      'select id, is_available from drivers where auth_subject_id = $1',
-      [auth.subjectId]
-    );
+    return await withTx(app.db, async (client) => {
+      const driver = await client.query<{ id: string; is_available: boolean }>(
+        'select id, is_available from drivers where auth_subject_id = $1',
+        [auth.subjectId]
+      );
 
-    if (driver.rowCount === 0) {
-      throw httpError(409, 'CONFLICT', 'Driver profile not found');
-    }
-    if (!driver.rows[0]!.is_available) {
-      throw httpError(409, 'CONFLICT', 'Driver is not available');
-    }
+      if (driver.rowCount === 0) {
+        throw httpError(409, 'CONFLICT', 'Driver profile not found');
+      }
+      if (!driver.rows[0]!.is_available) {
+        throw httpError(409, 'CONFLICT', 'Driver is not available');
+      }
 
-    const driverId = driver.rows[0]!.id;
+      const driverId = driver.rows[0]!.id;
 
-    const updated = await app.db.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id'>>(
-      `update rides
-          set driver_id = $2,
-              assigned_at = now(),
-              status = 'accepted',
-              updated_at = now()
-        where id = $1
-          and status = 'requested'
-          and driver_id is null
-        returning id, status, passenger_id, driver_id, created_at, updated_at`,
-      [rideId, driverId]
-    );
+      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id'>>(
+        `select id, status, passenger_id, driver_id
+           from rides
+          where id = $1
+          for update`,
+        [rideId]
+      );
 
-    if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride is not available to accept');
+      if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
 
-    const row = updated.rows[0]!;
-    return { rideId: row.id, status: row.status, passengerId: row.passenger_id, driverId: row.driver_id };
+      const row = ride.rows[0]!;
+      const decision = decideAccept(row.status as RideStatus, row.driver_id, driverId);
+
+      if (decision.kind === 'idempotent') {
+        return { rideId: row.id, status: 'accepted', passengerId: row.passenger_id, driverId: row.driver_id };
+      }
+
+      if (decision.kind === 'conflict') {
+        throw httpError(409, 'CONFLICT', decision.message);
+      }
+
+      const updated = await client.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id'>>(
+        `update rides
+            set driver_id = $2,
+                assigned_at = now(),
+                status = 'accepted',
+                updated_at = now()
+          where id = $1
+            and status = 'requested'
+            and driver_id is null
+          returning id, status, passenger_id, driver_id`,
+        [rideId, driverId]
+      );
+
+      if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride is not available to accept');
+
+      const updatedRow = updated.rows[0]!;
+      return {
+        rideId: updatedRow.id,
+        status: updatedRow.status,
+        passengerId: updatedRow.passenger_id,
+        driverId: updatedRow.driver_id
+      };
+    });
   });
 
   app.post('/rides/:rideId/cancel', {
@@ -197,49 +234,211 @@ export async function registerRideRoutes(app: FastifyInstance) {
     const { rideId } = req.params as { rideId: string };
     const body = (req.body ?? {}) as { reason?: string };
 
-    const ride = await app.db.query<{
-      id: string;
-      status: string;
-      passenger_auth_subject_id: string;
-      driver_auth_subject_id: string | null;
-    }>(
-      `select r.id, r.status,
-              p.auth_subject_id as passenger_auth_subject_id,
-              d.auth_subject_id as driver_auth_subject_id
-         from rides r
-         join passengers p on p.id = r.passenger_id
-         left join drivers d on d.id = r.driver_id
-        where r.id = $1`,
-      [rideId]
-    );
+    return await withTx(app.db, async (client) => {
+      const ride = await client.query<{
+        id: string;
+        status: string;
+        passenger_auth_subject_id: string;
+        driver_auth_subject_id: string | null;
+      }>(
+        `select r.id, r.status,
+                p.auth_subject_id as passenger_auth_subject_id,
+                d.auth_subject_id as driver_auth_subject_id
+           from rides r
+           join passengers p on p.id = r.passenger_id
+           left join drivers d on d.id = r.driver_id
+          where r.id = $1
+          for update of r`,
+        [rideId]
+      );
 
-    if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
+      if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
 
-    const row = ride.rows[0]!;
+      const row = ride.rows[0]!;
 
-    const isPassengerOwner = auth.role === 'passenger' && row.passenger_auth_subject_id === auth.subjectId;
-    const isDriverAssigned = auth.role === 'driver' && row.driver_auth_subject_id === auth.subjectId;
-    const isAdminOrSystem = auth.role === 'admin' || auth.role === 'system';
+      const isPassengerOwner = auth.role === 'passenger' && row.passenger_auth_subject_id === auth.subjectId;
+      const isDriverAssigned = auth.role === 'driver' && row.driver_auth_subject_id === auth.subjectId;
+      const isAdminOrSystem = auth.role === 'admin' || auth.role === 'system';
 
-    if (!isPassengerOwner && !isDriverAssigned && !isAdminOrSystem) {
-      throw httpError(403, 'FORBIDDEN', 'Forbidden');
+      if (!isPassengerOwner && !isDriverAssigned && !isAdminOrSystem) {
+        throw httpError(403, 'FORBIDDEN', 'Forbidden');
+      }
+
+      const decision = decideCancel(row.status as RideStatus);
+      if (decision.kind === 'idempotent') return { rideId, status: 'cancelled' };
+      if (decision.kind === 'conflict') throw httpError(409, 'CONFLICT', decision.message);
+
+      const updated = await client.query(
+        `update rides
+            set status = 'cancelled',
+                cancelled_at = now(),
+                cancelled_reason = $2,
+                updated_at = now()
+          where id = $1
+            and status in ('requested', 'accepted', 'arrived')
+          returning id, status`,
+        [rideId, body.reason ?? null]
+      );
+
+      if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride cannot be cancelled in current state');
+      return { rideId, status: 'cancelled' };
+    });
+  });
+
+  app.post('/rides/:rideId/arrive', {
+    schema: {
+      tags: ['Ride'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: { rideId: { type: 'string' } },
+        required: ['rideId']
+      }
     }
+  }, async (req) => {
+    const auth = requireRole(req, 'driver');
+    const { rideId } = req.params as { rideId: string };
 
-    const updated = await app.db.query(
-      `update rides
-          set status = 'cancelled',
-              cancelled_at = now(),
-              cancelled_reason = $2,
-              updated_at = now()
-        where id = $1
-          and status in ('requested', 'accepted', 'arrived')
-        returning id, status`,
-      [rideId, body.reason ?? null]
-    );
+    return await withTx(app.db, async (client) => {
+      const driver = await client.query<{ id: string }>('select id from drivers where auth_subject_id = $1', [
+        auth.subjectId
+      ]);
+      if (driver.rowCount === 0) throw httpError(409, 'CONFLICT', 'Driver profile not found');
+      const driverId = driver.rows[0]!.id;
 
-    if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride cannot be cancelled in current state');
+      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'driver_id'>>(
+        `select id, status, driver_id
+           from rides
+          where id = $1
+          for update`,
+        [rideId]
+      );
+      if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
 
-    return { rideId, status: 'cancelled' };
+      const row = ride.rows[0]!;
+      const decision = decideArrive(row.status as RideStatus, row.driver_id, driverId);
+      if (decision.kind === 'idempotent') return { rideId, status: 'arrived' };
+      if (decision.kind === 'conflict') throw httpError(409, 'CONFLICT', decision.message);
+
+      const updated = await client.query(
+        `update rides
+            set status = 'arrived',
+                arrived_at = now(),
+                updated_at = now()
+          where id = $1
+            and status = 'accepted'
+            and driver_id = $2
+          returning id, status`,
+        [rideId, driverId]
+      );
+
+      if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride cannot be marked arrived in current state');
+      return { rideId, status: 'arrived' };
+    });
+  });
+
+  app.post('/rides/:rideId/start', {
+    schema: {
+      tags: ['Ride'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: { rideId: { type: 'string' } },
+        required: ['rideId']
+      }
+    }
+  }, async (req) => {
+    const auth = requireRole(req, 'driver');
+    const { rideId } = req.params as { rideId: string };
+
+    return await withTx(app.db, async (client) => {
+      const driver = await client.query<{ id: string }>('select id from drivers where auth_subject_id = $1', [
+        auth.subjectId
+      ]);
+      if (driver.rowCount === 0) throw httpError(409, 'CONFLICT', 'Driver profile not found');
+      const driverId = driver.rows[0]!.id;
+
+      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'driver_id'>>(
+        `select id, status, driver_id
+           from rides
+          where id = $1
+          for update`,
+        [rideId]
+      );
+      if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
+
+      const row = ride.rows[0]!;
+      const decision = decideStart(row.status as RideStatus, row.driver_id, driverId);
+      if (decision.kind === 'idempotent') return { rideId, status: 'in_progress' };
+      if (decision.kind === 'conflict') throw httpError(409, 'CONFLICT', decision.message);
+
+      const updated = await client.query(
+        `update rides
+            set status = 'in_progress',
+                started_at = now(),
+                updated_at = now()
+          where id = $1
+            and status = 'arrived'
+            and driver_id = $2
+          returning id, status`,
+        [rideId, driverId]
+      );
+
+      if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride cannot be started in current state');
+      return { rideId, status: 'in_progress' };
+    });
+  });
+
+  app.post('/rides/:rideId/complete', {
+    schema: {
+      tags: ['Ride'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: { rideId: { type: 'string' } },
+        required: ['rideId']
+      }
+    }
+  }, async (req) => {
+    const auth = requireRole(req, 'driver');
+    const { rideId } = req.params as { rideId: string };
+
+    return await withTx(app.db, async (client) => {
+      const driver = await client.query<{ id: string }>('select id from drivers where auth_subject_id = $1', [
+        auth.subjectId
+      ]);
+      if (driver.rowCount === 0) throw httpError(409, 'CONFLICT', 'Driver profile not found');
+      const driverId = driver.rows[0]!.id;
+
+      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'driver_id'>>(
+        `select id, status, driver_id
+           from rides
+          where id = $1
+          for update`,
+        [rideId]
+      );
+      if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
+
+      const row = ride.rows[0]!;
+      const decision = decideComplete(row.status as RideStatus, row.driver_id, driverId);
+      if (decision.kind === 'idempotent') return { rideId, status: 'completed' };
+      if (decision.kind === 'conflict') throw httpError(409, 'CONFLICT', decision.message);
+
+      const updated = await client.query(
+        `update rides
+            set status = 'completed',
+                completed_at = now(),
+                updated_at = now()
+          where id = $1
+            and status = 'in_progress'
+            and driver_id = $2
+          returning id, status`,
+        [rideId, driverId]
+      );
+
+      if (updated.rowCount === 0) throw httpError(409, 'CONFLICT', 'Ride cannot be completed in current state');
+      return { rideId, status: 'completed' };
+    });
   });
 }
 
