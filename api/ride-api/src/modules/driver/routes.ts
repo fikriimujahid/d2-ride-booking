@@ -130,4 +130,39 @@ export async function registerDriverRoutes(app: FastifyInstance) {
     const row = updated.rows[0];
     return { driverId: row.id, isAvailable: row.is_available, updatedAt: row.updated_at };
   });
+
+  app.patch('/drivers/me/location', {
+    schema: {
+      tags: ['Driver'],
+      security: [{ bearerAuth: [] }],
+      body: {
+        type: 'object',
+        properties: {
+          lat: { type: 'number' },
+          lng: { type: 'number' }
+        },
+        required: ['lat', 'lng'],
+        additionalProperties: false
+      }
+    }
+  }, async (req) => {
+    const auth = requireRole(req, 'driver');
+    const body = req.body as { lat: number; lng: number };
+
+    await app.db.query(`insert into drivers(auth_subject_id) values ($1) on conflict do nothing`, [auth.subjectId]);
+
+    const updated = await app.db.query(
+      `update drivers
+          set current_lat = $2,
+              current_lng = $3,
+              last_seen_at = now(),
+              updated_at = now()
+        where auth_subject_id = $1
+        returning id, current_lat, current_lng, last_seen_at`,
+      [auth.subjectId, body.lat, body.lng]
+    );
+
+    const row = updated.rows[0];
+    return { driverId: row.id, lat: row.current_lat, lng: row.current_lng, lastSeenAt: row.last_seen_at };
+  });
 }

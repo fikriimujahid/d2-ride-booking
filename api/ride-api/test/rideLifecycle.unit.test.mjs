@@ -13,6 +13,15 @@ test('decideAccept: requested -> apply', () => {
   assert.deepEqual(decideAccept('requested', null, 'D1'), { kind: 'apply' });
 });
 
+test('decideAccept: offered to same driver -> apply', () => {
+  assert.deepEqual(decideAccept('offered', 'D1', 'D1'), { kind: 'apply' });
+});
+
+test('decideAccept: offered to other driver -> conflict', () => {
+  const res = decideAccept('offered', 'D1', 'D2');
+  assert.equal(res.kind, 'conflict');
+});
+
 test('decideAccept: accepted by same driver -> idempotent', () => {
   assert.deepEqual(decideAccept('accepted', 'D1', 'D1'), { kind: 'idempotent' });
 });

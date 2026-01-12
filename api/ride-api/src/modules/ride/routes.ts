@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { httpError } from '../../util/httpErrors.js';
 import { requireAuth, requireRole } from '../../plugins/authContext.js';
 import { withTx } from '../../db/tx.js';
+import { matchRideToDriver } from '../matching/driverMatching.js';
 import {
   decideAccept,
   decideArrive,
@@ -27,6 +28,8 @@ type RideRowBase = {
   status: string;
   passenger_id: string;
   driver_id: string | null;
+  offered_driver_id?: string | null;
+  offer_expires_at?: string | null;
   pickup: unknown;
   dropoff: unknown;
   created_at: string;
@@ -132,11 +135,45 @@ export async function registerRideRoutes(app: FastifyInstance) {
       status: row.status,
       passengerId: row.passenger_id,
       driverId: row.driver_id,
+      offeredDriverId: (row as RideRowBase).offered_driver_id ?? null,
+      offerExpiresAt: (row as RideRowBase).offer_expires_at ?? null,
       pickup: row.pickup,
       dropoff: row.dropoff,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     };
+  });
+
+  app.post('/rides/:rideId/match', {
+    schema: {
+      tags: ['Ride'],
+      security: [{ bearerAuth: [] }],
+      params: {
+        type: 'object',
+        properties: { rideId: { type: 'string' } },
+        required: ['rideId']
+      },
+      body: {
+        type: 'object',
+        properties: {
+          maxWaitMs: { type: 'number' },
+          initialRadiusM: { type: 'number' },
+          maxRadiusM: { type: 'number' },
+          offerTtlMs: { type: 'number' }
+        },
+        additionalProperties: false
+      }
+    }
+  }, async (req) => {
+    requireRole(req, 'system');
+    const { rideId } = req.params as { rideId: string };
+    const body = (req.body ?? {}) as {
+      maxWaitMs?: number;
+      initialRadiusM?: number;
+      maxRadiusM?: number;
+      offerTtlMs?: number;
+    };
+    return await matchRideToDriver(req.server, rideId, body);
   });
 
   app.post('/rides/:rideId/accept', {
@@ -168,8 +205,8 @@ export async function registerRideRoutes(app: FastifyInstance) {
 
       const driverId = driver.rows[0]!.id;
 
-      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id'>>(
-        `select id, status, passenger_id, driver_id
+      const ride = await client.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id' | 'offered_driver_id'>>(
+        `select id, status, passenger_id, driver_id, offered_driver_id
            from rides
           where id = $1
           for update`,
@@ -179,7 +216,7 @@ export async function registerRideRoutes(app: FastifyInstance) {
       if (ride.rowCount === 0) throw httpError(404, 'NOT_FOUND', 'Ride not found');
 
       const row = ride.rows[0]!;
-      const decision = decideAccept(row.status as RideStatus, row.driver_id, driverId);
+      const decision = decideAccept(row.status as RideStatus, row.driver_id ?? row.offered_driver_id ?? null, driverId);
 
       if (decision.kind === 'idempotent') {
         return { rideId: row.id, status: 'accepted', passengerId: row.passenger_id, driverId: row.driver_id };
@@ -192,12 +229,16 @@ export async function registerRideRoutes(app: FastifyInstance) {
       const updated = await client.query<Pick<RideRowBase, 'id' | 'status' | 'passenger_id' | 'driver_id'>>(
         `update rides
             set driver_id = $2,
+                offered_driver_id = null,
+                offer_expires_at = null,
                 assigned_at = now(),
                 status = 'accepted',
                 updated_at = now()
           where id = $1
-            and status = 'requested'
-            and driver_id is null
+            and (
+              (status = 'requested' and driver_id is null and offered_driver_id is null)
+              or (status = 'offered' and driver_id is null and offered_driver_id = $2 and offer_expires_at is not null and offer_expires_at > now())
+            )
           returning id, status, passenger_id, driver_id`,
         [rideId, driverId]
       );
@@ -271,11 +312,13 @@ export async function registerRideRoutes(app: FastifyInstance) {
       const updated = await client.query(
         `update rides
             set status = 'cancelled',
+                offered_driver_id = null,
+                offer_expires_at = null,
                 cancelled_at = now(),
                 cancelled_reason = $2,
                 updated_at = now()
           where id = $1
-            and status in ('requested', 'accepted', 'arrived')
+            and status in ('requested', 'offered', 'accepted', 'arrived')
           returning id, status`,
         [rideId, body.reason ?? null]
       );
