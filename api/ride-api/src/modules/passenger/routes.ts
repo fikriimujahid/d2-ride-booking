@@ -1,7 +1,107 @@
 import type { FastifyInstance } from 'fastify';
 import { requireRole } from '../../plugins/authContext.js';
+import { createPassengerQuote } from './quote.js';
 
 export async function registerPassengerRoutes(app: FastifyInstance) {
+  app.post('/passengers/quotes', {
+    schema: {
+      tags: ['Passenger'],
+      security: [{ bearerAuth: [] }],
+      body: {
+        type: 'object',
+        properties: {
+          pickup: {
+            type: 'object',
+            properties: {
+              lat: { type: 'number' },
+              lng: { type: 'number' }
+            },
+            required: ['lat', 'lng'],
+            additionalProperties: false
+          },
+          dropoff: {
+            type: 'object',
+            properties: {
+              lat: { type: 'number' },
+              lng: { type: 'number' }
+            },
+            required: ['lat', 'lng'],
+            additionalProperties: false
+          },
+          currency: { type: 'string', minLength: 3, maxLength: 8 }
+        },
+        required: ['pickup', 'dropoff'],
+        additionalProperties: false
+      },
+      response: {
+        200: {
+          type: 'object',
+          properties: {
+            quoteId: { type: 'string' },
+            currency: { type: 'string' },
+            totalCents: { type: 'number' },
+            breakdown: {
+              type: 'object',
+              properties: {
+                baseFareCents: { type: 'number' },
+                distanceFareCents: { type: 'number' },
+                timeFareCents: { type: 'number' },
+                bookingFeeCents: { type: 'number' },
+                subtotalCents: { type: 'number' },
+                minimumFareCents: { type: 'number' },
+                surgeMultiplier: { type: 'number' },
+                totalCents: { type: 'number' }
+              },
+              required: [
+                'baseFareCents',
+                'distanceFareCents',
+                'timeFareCents',
+                'bookingFeeCents',
+                'subtotalCents',
+                'minimumFareCents',
+                'surgeMultiplier',
+                'totalCents'
+              ]
+            },
+            distanceMeters: { type: 'number' },
+            durationSeconds: { type: 'number' },
+            etaSeconds: { type: 'number' },
+            estimated: { type: 'boolean' },
+            expiresAt: { type: 'string' }
+          },
+          required: [
+            'quoteId',
+            'currency',
+            'totalCents',
+            'breakdown',
+            'distanceMeters',
+            'durationSeconds',
+            'etaSeconds',
+            'estimated',
+            'expiresAt'
+          ]
+        }
+      }
+    }
+  }, async (req) => {
+    requireRole(req, 'passenger');
+
+    const body = req.body as { pickup: { lat: number; lng: number }; dropoff: { lat: number; lng: number }; currency?: string };
+
+    return await createPassengerQuote(
+      {
+        pickup: body.pickup,
+        dropoff: body.dropoff,
+        currency: body.currency
+      },
+      {
+        redis: req.server.redis,
+        googleMapsApiKey: req.server.config.googleMapsApiKey,
+        googleMapsTimeoutMs: req.server.config.googleMapsTimeoutMs
+      }
+    );
+  });
+
   app.get('/passengers/me', {
     schema: {
       tags: ['Passenger'],
