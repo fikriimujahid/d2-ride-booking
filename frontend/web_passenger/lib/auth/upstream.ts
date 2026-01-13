@@ -2,21 +2,7 @@ import {
   UpstreamAuthPayloadSchema,
   type UpstreamAuthPayload,
 } from "./schemas"
-
-function authApiBaseUrlV1() {
-  const baseA = process.env.BACKEND_API_BASE_URL
-  const baseB = process.env.AUTH_API_BASE_URL
-
-  if (baseA && baseB && baseA !== baseB) {
-    throw new Error(
-      "BACKEND_API_BASE_URL and AUTH_API_BASE_URL must match (single API base URL invariant)"
-    )
-  }
-
-  const rawBase = baseA ?? baseB ?? "http://localhost:3000"
-  const trimmed = rawBase.replace(/\/$/, "")
-  return trimmed.endsWith("/api/v1") ? trimmed : `${trimmed}/api/v1`
-}
+import { getServerApiBaseUrl } from "@/lib/config/apiBaseUrl"
 
 async function parseJsonSafe(res: Response): Promise<unknown | undefined> {
   try {
@@ -27,7 +13,7 @@ async function parseJsonSafe(res: Response): Promise<unknown | undefined> {
 }
 
 export async function passengerLogin(input: { email: string; password: string }) {
-  const res = await fetch(`${authApiBaseUrlV1()}/passenger/auth/login`, {
+  const res = await fetch(`${getServerApiBaseUrl()}/passenger/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -40,7 +26,7 @@ export async function passengerLogin(input: { email: string; password: string })
 }
 
 export async function passengerRefresh(input: { refreshToken: string }) {
-  const res = await fetch(`${authApiBaseUrlV1()}/passenger/auth/refresh`, {
+  const res = await fetch(`${getServerApiBaseUrl()}/passenger/auth/refresh`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),
@@ -53,7 +39,7 @@ export async function passengerRefresh(input: { refreshToken: string }) {
 }
 
 export async function passengerLogout(input: { refreshToken: string }) {
-  const res = await fetch(`${authApiBaseUrlV1()}/passenger/auth/logout`, {
+  const res = await fetch(`${getServerApiBaseUrl()}/passenger/auth/logout`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(input),

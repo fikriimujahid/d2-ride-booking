@@ -4,6 +4,7 @@ import { AUTH_COOKIES } from "@/lib/auth/cookies"
 import { clearAuthCookies } from "@/lib/auth/tokenStore"
 import { TokenResponseSchema } from "@/lib/auth/schemas"
 import { passengerRefresh } from "@/lib/auth/upstream"
+import { getServerApiBaseUrl } from "@/lib/config/apiBaseUrl"
 
 const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const
 type SupportedMethod = (typeof SUPPORTED_METHODS)[number]
@@ -31,22 +32,12 @@ async function rotateTokens() {
 }
 
 async function proxy(req: NextRequest, params: { path: string[] }) {
-  const baseA = process.env.BACKEND_API_BASE_URL
-  const baseB = process.env.AUTH_API_BASE_URL
-
-  if (baseA && baseB && baseA !== baseB) {
-    return NextResponse.json(
-      { message: "BACKEND_API_BASE_URL and AUTH_API_BASE_URL must match" },
-      { status: 500 }
-    )
-  }
-
-  const baseUrl = baseA ?? baseB
-  if (!baseUrl) {
-    return NextResponse.json(
-      { message: "Missing BACKEND_API_BASE_URL (or AUTH_API_BASE_URL as fallback)" },
-      { status: 500 }
-    )
+  let baseUrl: string
+  try {
+    baseUrl = getServerApiBaseUrl()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Missing API base URL"
+    return NextResponse.json({ message }, { status: 500 })
   }
 
   const method = req.method.toUpperCase()

@@ -3,6 +3,8 @@ import { z } from "zod"
 const JwtPayloadSchema = z.record(z.string(), z.unknown())
 export type JwtPayload = z.infer<typeof JwtPayloadSchema>
 
+export type UserRole = "ADMIN" | "DRIVER" | "PASSENGER"
+
 function base64UrlDecodeToString(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
   const pad = normalized.length % 4
@@ -24,8 +26,17 @@ export function getJwtExpSeconds(token: string): number | null {
   return typeof exp === "number" ? exp : null
 }
 
-export function getJwtUserType(token: string): string | null {
+export function getJwtUserType(token: string): UserRole | null {
   const payload = decodeJwtPayload(token)
-  const ut = payload["ut"]
-  return typeof ut === "string" ? ut : null
+
+  const candidates = [payload["role"], payload["ut"]]
+  for (const value of candidates) {
+    if (typeof value !== "string") continue
+    const normalized = value.trim().toUpperCase()
+    if (normalized === "ADMIN" || normalized === "DRIVER" || normalized === "PASSENGER") {
+      return normalized
+    }
+  }
+
+  return null
 }

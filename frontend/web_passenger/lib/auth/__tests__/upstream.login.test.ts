@@ -14,7 +14,7 @@ describe("web_passenger auth upstream", () => {
   })
 
   it("calls /api/v1/passenger/auth/login with {email,password}", async () => {
-    process.env.AUTH_API_BASE_URL = "http://localhost:3000"
+    process.env.API_BASE_URL = "http://localhost:3000/api/v1"
 
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       return new Response(JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: "2026-01-01T00:00:00.000Z" }), {
@@ -34,14 +34,17 @@ describe("web_passenger auth upstream", () => {
     expect(init?.body).toBe(JSON.stringify({ email: "p@example.com", password: "password123" }))
   })
 
-  it("does not double-prefix when AUTH_API_BASE_URL already ends with /api/v1", async () => {
-    process.env.AUTH_API_BASE_URL = "http://localhost:3000/api/v1"
+  it("uses API_BASE_URL as-is (must include /api/v1)", async () => {
+    process.env.API_BASE_URL = "http://localhost:3000/api/v1"
 
     const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
-      return new Response(JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: "2026-01-01T00:00:00.000Z" }), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      })
+      return new Response(
+        JSON.stringify({ accessToken: "at", refreshToken: "rt", expiresAt: "2026-01-01T00:00:00.000Z" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }
+      )
     })
     globalThis.fetch = fetchMock
 
@@ -52,7 +55,7 @@ describe("web_passenger auth upstream", () => {
   })
 
   it("parses nested backend error envelope", async () => {
-    process.env.AUTH_API_BASE_URL = "http://localhost:3000"
+    process.env.API_BASE_URL = "http://localhost:3000/api/v1"
 
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ error: { code: "INVALID_CREDENTIALS", message: "Invalid email or password" } }), {
