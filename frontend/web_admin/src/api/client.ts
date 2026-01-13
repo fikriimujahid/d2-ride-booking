@@ -2,10 +2,10 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { ApiError } from './types';
 import { authStore } from '../app/auth/authStore';
 import { authClient } from '../services/authClient';
+import { getApiBaseUrl } from '../config/apiBaseUrl';
+import { getRecord, getString, isRecord } from '../shared/typeGuards';
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ||
-  (import.meta.env.DEV ? 'http://localhost:3000' : '');
+export const API_BASE_URL = getApiBaseUrl();
 
 function getAccessToken(): string | null {
   return authStore.getAccessToken();
@@ -92,18 +92,28 @@ client.interceptors.response.use(
       console.warn('Access forbidden - insufficient permissions');
     }
 
-    const data: any = error.response?.data;
+    const data: unknown = error.response?.data;
     const message = (() => {
-      // Backend may return various error shapes:
-      // - { message: "..." }
-      // - { error: "...", message: "..." }
-      // - { message: { message: "...", error: { code, message } } }
-      if (typeof data?.error?.message === 'string') return data.error.message;
-      if (typeof data?.message === 'string') return data.message;
-      if (typeof data?.message?.message === 'string') return data.message.message;
-      if (typeof data?.message?.error?.message === 'string') return data.message.error.message;
-      if (typeof error.message === 'string' && error.message) return error.message;
-      return 'Unknown error';
+      if (!isRecord(data)) {
+        return typeof error.message === 'string' && error.message ? error.message : 'Unknown error';
+      }
+
+      const errObj = getRecord(data.error);
+      const errMessage = errObj ? getString(errObj.message) : undefined;
+      if (errMessage) return errMessage;
+
+      const messageStr = getString(data.message);
+      if (messageStr) return messageStr;
+
+      const nestedMessage = getRecord(data.message);
+      const nestedMessageStr = nestedMessage ? getString(nestedMessage.message) : undefined;
+      if (nestedMessageStr) return nestedMessageStr;
+
+      const nestedError = nestedMessage ? getRecord(nestedMessage.error) : undefined;
+      const nestedErrorMessage = nestedError ? getString(nestedError.message) : undefined;
+      if (nestedErrorMessage) return nestedErrorMessage;
+
+      return typeof error.message === 'string' && error.message ? error.message : 'Unknown error';
     })();
 
     const apiError: ApiError = {

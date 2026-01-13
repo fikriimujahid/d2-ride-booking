@@ -4,9 +4,6 @@ const nextConfig = {
   // `next build` will emit an `out/` directory.
   output: 'export',
   trailingSlash: true,
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   images: {
     unoptimized: true,
   },

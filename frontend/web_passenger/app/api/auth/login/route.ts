@@ -1,21 +1,31 @@
 import { NextResponse, type NextRequest } from "next/server"
+import { z } from "zod"
 import { setAuthCookies, clearAuthCookies } from "@/lib/auth/tokenStore"
+import { TokenResponseSchema } from "@/lib/auth/schemas"
 import { passengerLogin } from "@/lib/auth/upstream"
 
 export async function POST(req: NextRequest) {
-  let body: { identifier?: string; password?: string }
+  const BodySchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(1),
+  })
+
+  let bodyRaw: unknown
   try {
-    body = (await req.json()) as { identifier?: string; password?: string }
+    bodyRaw = await req.json()
   } catch {
     return NextResponse.json({ message: "Invalid JSON" }, { status: 400 })
   }
 
-  if (!body.identifier || !body.password) {
-    return NextResponse.json({ message: "Missing identifier or password" }, { status: 400 })
+  const bodyParsed = BodySchema.safeParse(bodyRaw)
+  if (!bodyParsed.success) {
+    return NextResponse.json({ message: "Invalid request body" }, { status: 400 })
   }
 
+  const body = bodyParsed.data
+
   const { res: upstream, payload } = await passengerLogin({
-    identifier: body.identifier,
+    email: body.email,
     password: body.password,
   })
 
@@ -24,13 +34,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(payload ?? { message: "Login failed" }, { status: upstream.status })
   }
 
-  const accessToken = (payload as any)?.accessToken
-  const refreshToken = (payload as any)?.refreshToken
-
-  if (typeof accessToken !== "string" || typeof refreshToken !== "string") {
+  const tokenParsed = TokenResponseSchema.safeParse(payload)
+  if (!tokenParsed.success) {
     await clearAuthCookies()
     return NextResponse.json({ message: "Invalid auth response" }, { status: 502 })
   }
+
+  const { accessToken, refreshToken } = tokenParsed.data
 
   try {
     await setAuthCookies({ accessToken, refreshToken })

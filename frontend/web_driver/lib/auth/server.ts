@@ -1,19 +1,38 @@
+import 'server-only';
+
 import { cookies } from 'next/headers';
 import type { NextResponse } from 'next/server';
 import { authCookies, authCookieOptions, ACCESS_TOKEN_MAX_AGE_SECONDS } from './cookies';
+import { getServerApiBaseUrl } from '../config/apiBaseUrl';
+import { TokenResponseSchema, type TokenResponse } from './token';
 
-type TokenResponse = {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: string; // ISO
-};
+function parseTokenResponse(value: unknown): TokenResponse | null {
+  const parsed = TokenResponseSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function extractErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    if (typeof d.message === 'string' && d.message) return d.message;
+    if (Array.isArray(d.message)) {
+      const joined = d.message.filter((x): x is string => typeof x === 'string').join('\n');
+      if (joined) return joined;
+    }
+
+    const err = d.error;
+    if (err && typeof err === 'object') {
+      const e = err as Record<string, unknown>;
+      if (typeof e.message === 'string' && e.message) return e.message;
+    }
+    if (typeof err === 'string' && err) return err;
+  }
+  return fallback;
+}
 
 function getAuthApiBaseUrl() {
-  const raw = process.env.AUTH_API_BASE_URL;
-  if (!raw) {
-    throw new Error('Missing AUTH_API_BASE_URL (e.g. http://localhost:3000)');
-  }
-  return raw.replace(/\/$/, '');
+  return getServerApiBaseUrl();
 }
 
 export function readAccessTokenCookie() {
@@ -56,7 +75,7 @@ export function applyAuthCookies(res: NextResponse, tokens: TokenResponse) {
   });
 }
 
-export async function backendDriverLogin(opts: { identifier: string; password: string }) {
+export async function backendDriverLogin(opts: { email: string; password: string }) {
   const res = await fetch(`${getAuthApiBaseUrl()}/driver/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -65,11 +84,13 @@ export async function backendDriverLogin(opts: { identifier: string; password: s
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = data?.message ?? data?.error ?? 'Login failed';
+    const message = extractErrorMessage(data, 'Login failed');
     return { ok: false as const, status: res.status, message };
   }
 
-  return { ok: true as const, tokens: data as TokenResponse };
+  const tokens = parseTokenResponse(data);
+  if (!tokens) return { ok: false as const, status: 500, message: 'Invalid token response' };
+  return { ok: true as const, tokens };
 }
 
 export async function backendDriverRefresh(refreshToken: string) {
@@ -81,11 +102,13 @@ export async function backendDriverRefresh(refreshToken: string) {
 
   const data = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = data?.message ?? data?.error ?? 'Refresh failed';
+    const message = extractErrorMessage(data, 'Refresh failed');
     return { ok: false as const, status: res.status, message };
   }
 
-  return { ok: true as const, tokens: data as TokenResponse };
+  const tokens = parseTokenResponse(data);
+  if (!tokens) return { ok: false as const, status: 500, message: 'Invalid token response' };
+  return { ok: true as const, tokens };
 }
 
 export async function backendDriverLogout(refreshToken: string) {

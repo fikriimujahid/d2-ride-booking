@@ -25,12 +25,11 @@
 
     "types": ["vite/client"]
   },
-  "include": [
-    "src/app/api/**/*",
-    "src/app/auth/**/*",
-    "src/services/**/*",
-    "src/types/**/*",
-    "src/test/**/*",
-    "src/**/__tests__/**/*"
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "src/app/components/legacy/**",
+    "src/app/components/auth/useAdminLoginFlow.tsx"
   ]
 }

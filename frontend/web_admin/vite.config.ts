@@ -4,6 +4,9 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // S3 static hosting friendly: relative asset paths so the app can be hosted
+  // from an S3 bucket root or a subfolder without rewriting.
+  base: './',
   plugins: [
     // The React and Tailwind plugins are both required for Make, even if
     // Tailwind is not being actively used – do not remove them
@@ -12,20 +15,12 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      // Auth API (Fastify) - we keep this separate from the main API proxy
-      // so other backend services can still live behind /api.
-      // Example: /auth-api/admin/auth/login -> http://localhost:3000/admin/auth/login
-      "/auth-api": {
-        target: "http://localhost:3000",
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/auth-api/, ""),
-      },
-      // Allow the dashboard to call the API without CORS hassles in dev.
+      // Single backend API (Fastify modular monolith)
       // With VITE_API_BASE_URL="/api/v1", requests are proxied to the backend.
       "/api": {
-        target: "http://localhost:3000",
-        changeOrigin: true,
-      },
+        target: "http://localhost:3001",
+        changeOrigin: true
+      }
     },
   },
   resolve: {

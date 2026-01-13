@@ -1,8 +1,7 @@
-type TokenResponse = {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: string; // ISO
-};
+import 'client-only';
+
+import { getPublicApiBaseUrl } from '../config/apiBaseUrl';
+import { TokenResponseSchema, type TokenResponse } from './token';
 
 export type LoginResult = { ok: true } | { ok: false; status: number; message: string };
 
@@ -10,24 +9,39 @@ const storageKeys = {
   tokens: 'd2_driver_tokens',
 } as const;
 
-function getAuthApiBaseUrl() {
-  const raw = process.env.NEXT_PUBLIC_AUTH_API_BASE_URL;
-  if (!raw) {
-    throw new Error(
-      'Missing NEXT_PUBLIC_AUTH_API_BASE_URL (e.g. https://api.example.com). This must be set at build time.'
-    );
+function parseTokenResponse(value: unknown): TokenResponse | null {
+  const parsed = TokenResponseSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
+
+function extractErrorMessage(data: unknown, fallback: string): string {
+  if (typeof data === 'string' && data.trim()) return data;
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    if (typeof d.message === 'string' && d.message) return d.message;
+    if (Array.isArray(d.message)) {
+      const joined = d.message.filter((x): x is string => typeof x === 'string').join('\n');
+      if (joined) return joined;
+    }
+
+    const err = d.error;
+    if (err && typeof err === 'object') {
+      const e = err as Record<string, unknown>;
+      if (typeof e.message === 'string' && e.message) return e.message;
+    }
+
+    if (typeof err === 'string' && err) return err;
   }
-  return raw.replace(/\/$/, '');
+  return fallback;
 }
 
 function readTokens(): TokenResponse | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(storageKeys.tokens);
+    const raw = window.sessionStorage.getItem(storageKeys.tokens);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as TokenResponse;
-    if (!parsed?.accessToken || !parsed?.refreshToken || !parsed?.expiresAt) return null;
-    return parsed;
+    const parsed: unknown = JSON.parse(raw);
+    return parseTokenResponse(parsed);
   } catch {
     return null;
   }
@@ -35,12 +49,12 @@ function readTokens(): TokenResponse | null {
 
 function writeTokens(tokens: TokenResponse) {
   if (typeof window === 'undefined') return;
-  window.localStorage.setItem(storageKeys.tokens, JSON.stringify(tokens));
+  window.sessionStorage.setItem(storageKeys.tokens, JSON.stringify(tokens));
 }
 
 export function clearAuthTokens() {
   if (typeof window === 'undefined') return;
-  window.localStorage.removeItem(storageKeys.tokens);
+  window.sessionStorage.removeItem(storageKeys.tokens);
 }
 
 export function getAccessToken(): string | null {
@@ -56,7 +70,7 @@ export async function refreshDriverSession(): Promise<{ ok: true } | { ok: false
   const refreshToken = getRefreshToken();
   if (!refreshToken) return { ok: false, status: 401, message: 'No session' };
 
-  const res = await fetch(`${getAuthApiBaseUrl()}/driver/auth/refresh`, {
+  const res = await fetch(`${getPublicApiBaseUrl()}/driver/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
@@ -68,19 +82,24 @@ export async function refreshDriverSession(): Promise<{ ok: true } | { ok: false
     return {
       ok: false,
       status: res.status,
-      message: data?.message ?? data?.error ?? 'Refresh failed',
+      message: extractErrorMessage(data, 'Refresh failed'),
     };
   }
 
-  writeTokens(data as TokenResponse);
+  const tokens = parseTokenResponse(data);
+  if (!tokens) {
+    clearAuthTokens();
+    return { ok: false, status: 500, message: 'Invalid token response' };
+  }
+  writeTokens(tokens);
   return { ok: true };
 }
 
-export async function driverLogin(identifier: string, password: string): Promise<LoginResult> {
-  const res = await fetch(`${getAuthApiBaseUrl()}/driver/auth/login`, {
+export async function driverLogin(email: string, password: string): Promise<LoginResult> {
+  const res = await fetch(`${getPublicApiBaseUrl()}/driver/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
+    body: JSON.stringify({ email, password }),
   });
 
   const data = await res.json().catch(() => null);
@@ -90,11 +109,16 @@ export async function driverLogin(identifier: string, password: string): Promise
     return {
       ok: false,
       status: res.status,
-      message: data?.message ?? data?.error ?? 'Login failed',
+      message: extractErrorMessage(data, 'Login failed'),
     };
   }
 
-  writeTokens(data as TokenResponse);
+  const tokens = parseTokenResponse(data);
+  if (!tokens) {
+    clearAuthTokens();
+    return { ok: false, status: 500, message: 'Invalid token response' };
+  }
+  writeTokens(tokens);
   return { ok: true };
 }
 
@@ -105,7 +129,7 @@ export async function driverLogout(): Promise<void> {
   if (!refreshToken) return;
 
   // Best-effort logout; the token is already cleared client-side.
-  await fetch(`${getAuthApiBaseUrl()}/driver/auth/logout`, {
+  await fetch(`${getPublicApiBaseUrl()}/driver/auth/logout`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken }),

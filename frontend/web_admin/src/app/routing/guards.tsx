@@ -1,5 +1,6 @@
 import { authStore } from "../auth/authStore";
 import { adminMenuItems } from "../components/layout/menuConfig";
+import type React from "react";
 
 /**
  * Route Guard Utilities
@@ -82,7 +83,7 @@ export function requirePermission<P extends object>(
   permission: string,
   Component: React.ComponentType<P>,
   fallback: React.ReactNode = null
-): React.FC<P> {
+): React.ComponentType<P> {
   return (props: P) => {
     if (!authStore.hasPermission(permission)) {
       return <>{fallback}</>;
@@ -101,7 +102,7 @@ export function requireAllPermissions<P extends object>(
   permissions: string[],
   Component: React.ComponentType<P>,
   fallback: React.ReactNode = null
-): React.FC<P> {
+): React.ComponentType<P> {
   return (props: P) => {
     if (!authStore.hasAllPermissions(permissions)) {
       return <>{fallback}</>;
@@ -120,7 +121,7 @@ export function requireAnyPermission<P extends object>(
   permissions: string[],
   Component: React.ComponentType<P>,
   fallback: React.ReactNode = null
-): React.FC<P> {
+): React.ComponentType<P> {
   return (props: P) => {
     if (!authStore.hasAnyPermission(permissions)) {
       return <>{fallback}</>;

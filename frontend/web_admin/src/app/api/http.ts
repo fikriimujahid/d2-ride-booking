@@ -2,15 +2,11 @@ import { ApiError, type ApiErrorResponse, type ApiSuccessResponse } from "./type
 import { authStore } from "../auth/authStore";
 import { emitAuthErrorEvent } from "../routing/authEvents";
 import { authClient } from "../../services/authClient";
+import { getApiBaseUrl } from "../../config/apiBaseUrl";
+import { getRecord, getString, isRecord } from "../../shared/typeGuards";
 
 function getBaseUrl() {
-  const env = (import.meta as any).env as any;
-  const baseUrl = env?.VITE_API_BASE_URL;
-  if (baseUrl) return String(baseUrl).replace(/\/$/, "");
-  if (env?.DEV) return "http://localhost:3000";
-  // In deployed builds, never fall back to localhost.
-  // An empty base makes requests relative to the current origin.
-  return "";
+  return getApiBaseUrl();
 }
 
 export async function apiRequest<T>(
@@ -61,33 +57,38 @@ export async function apiRequest<T>(
   }
 
   const isJson = (res.headers.get("content-type") || "").includes("application/json");
-  const body = isJson ? await res.json().catch(() => undefined) : await res.text().catch(() => undefined);
+  const body: unknown = isJson
+    ? await res.json().catch(() => undefined)
+    : await res.text().catch(() => undefined);
 
   if (!res.ok) {
-    const err = body as ApiErrorResponse | undefined;
-    let code =
-      (err && typeof err === "object" && "error" in err && (err as any).error?.code) ||
-      (body && typeof body === "object" && (body as any).message?.error?.code) ||
-      undefined;
+    const errorEnvelope = isRecord(body) ? (body as ApiErrorResponse) : undefined;
+    const errorObj = errorEnvelope ? getRecord(errorEnvelope.error) : undefined;
 
-    // Support auth-api error shape: { error: string, message: string }
-    if (!code && body && typeof body === "object" && typeof (body as any).error === "string") {
-      code = (body as any).error;
-    }
+    const codeFromEnvelope = errorObj ? getString(errorObj.code) : undefined;
+    const messageFromEnvelope = errorObj ? getString(errorObj.message) : undefined;
 
-    const nestedMessage = (() => {
-      if (!body || typeof body !== "object") return undefined;
-      const b: any = body;
-      if (typeof b.message === "string") return b.message;
-      if (Array.isArray(b.message)) return b.message.filter((x: any) => typeof x === "string").join("\n") || undefined;
-      if (b.message && typeof b.message === "object" && typeof b.message.message === "string") return b.message.message;
-      return undefined;
+    const messageField = isRecord(body) ? body.message : undefined;
+    const messageFromBody = (() => {
+      if (typeof messageField === "string") return messageField;
+      if (Array.isArray(messageField)) {
+        const joined = messageField
+          .filter((x): x is string => typeof x === "string")
+          .join("\n");
+        return joined || undefined;
+      }
+
+      const nested = getRecord(messageField);
+      return nested ? getString(nested.message) : undefined;
     })();
 
+    const codeFromBody = isRecord(body) ? getString(body.error) : undefined;
+
+    let code = codeFromEnvelope || codeFromBody;
     const message =
-      (err && typeof err === "object" && "error" in err && typeof (err as any).error?.message === "string" && (err as any).error.message) ||
-      (body && typeof body === "object" && typeof (body as any).message === "string" && (body as any).message) ||
-      nestedMessage ||
+      messageFromEnvelope ||
+      messageFromBody ||
+      (typeof body === "string" && body.trim() ? body : undefined) ||
       `Request failed (${res.status})`;
 
     // Infer auth error codes for known cases
@@ -111,14 +112,14 @@ export async function apiRequest<T>(
       message,
       status: res.status,
       code: typeof code === "string" ? code : undefined,
-      action: (err as any)?.error?.action,
-      details: (err as any)?.error?.details,
+      action: errorObj ? getString(errorObj.action) : undefined,
+      details: errorObj && isRecord(errorObj.details) ? (errorObj.details as Record<string, unknown>) : undefined,
     });
   }
 
   // Backend uses { success:true, data, message }
-  const wrapped = body as ApiSuccessResponse<T> | undefined;
-  if (wrapped && typeof wrapped === "object" && (wrapped as any).success === true && "data" in wrapped) {
+  if (isRecord(body) && body.success === true && "data" in body) {
+    const wrapped = body as ApiSuccessResponse<T>;
     return wrapped.data;
   }
 

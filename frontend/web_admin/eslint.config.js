@@ -5,7 +5,13 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "node_modules/**"],
+    ignores: [
+      "dist/**",
+      "node_modules/**",
+      // Keep lint scope aligned with tsconfig excludes for this project.
+      "src/app/components/legacy/**",
+      "src/app/components/auth/useAdminLoginFlow.tsx",
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,

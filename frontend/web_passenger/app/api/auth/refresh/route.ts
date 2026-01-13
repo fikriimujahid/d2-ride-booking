@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { AUTH_COOKIES } from "@/lib/auth/cookies"
 import { setAuthCookies, clearAuthCookies } from "@/lib/auth/tokenStore"
+import { TokenResponseSchema } from "@/lib/auth/schemas"
 import { passengerRefresh } from "@/lib/auth/upstream"
 
 export async function POST() {
@@ -18,12 +19,13 @@ export async function POST() {
     return NextResponse.json(payload ?? { message: "Refresh failed" }, { status: upstream.status })
   }
 
-  const accessToken = (payload as any)?.accessToken
-  const newRefreshToken = (payload as any)?.refreshToken
-  if (typeof accessToken !== "string" || typeof newRefreshToken !== "string") {
+  const tokenParsed = TokenResponseSchema.safeParse(payload)
+  if (!tokenParsed.success) {
     await clearAuthCookies()
     return NextResponse.json({ message: "Invalid refresh response" }, { status: 502 })
   }
+
+  const { accessToken, refreshToken: newRefreshToken } = tokenParsed.data
 
   await setAuthCookies({ accessToken, refreshToken: newRefreshToken })
   return NextResponse.json({ ok: true })

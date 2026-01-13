@@ -18,7 +18,9 @@ import { AdminShell } from "../components/layout/AdminShell";
  */
 export type Route = {
   path: string;
-  component: React.ComponentType<any>;
+  // Legacy route config file (not the active router).
+  // Using `never` here avoids `any` while allowing components with different prop requirements.
+  component: React.ComponentType<never>;
   requiresAuth?: boolean;
   requiresMfa?: boolean;
 };

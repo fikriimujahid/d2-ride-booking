@@ -9,6 +9,13 @@ import { useRouter } from "next/navigation"
 
 export default function SignupPage() {
   const router = useRouter()
+  const fields = ["name", "email", "phone", "password", "confirmPassword"] as const
+  type SignupField = (typeof fields)[number]
+
+  function isSignupField(value: string): value is SignupField {
+    return (fields as readonly string[]).includes(value)
+  }
+
   const [formData, setFormData] = useState({
     name: "",
     email: "",
@@ -18,10 +25,12 @@ export default function SignupPage() {
   })
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value,
-    })
+    const { name, value } = e.target
+    if (!isSignupField(name)) return
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }))
   }
 
   const handleSubmit = (e: React.FormEvent) => {

@@ -1,7 +1,13 @@
 /// <reference types="vite/client" />
 
-// This repo currently ships without TS config files.
-// Keeping this declaration in `src/` ensures VS Code/tsserver picks it up.
+interface ImportMetaEnv {
+  readonly VITE_API_BASE_URL?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 declare module "qrcode" {
   export function toDataURL(text: string, options?: Record<string, unknown>): Promise<string>;
 }
