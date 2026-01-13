@@ -36,7 +36,7 @@ jobs:
           node-version: '20'
 
       - name: Build backend
-        working-directory: api/auth-api
+        working-directory: backend
         run: |
           npm ci
           npm run build
