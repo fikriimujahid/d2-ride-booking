@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdminsList } from "./AdminsList";
 import { AdminForm } from "./AdminForm";
 import type { Admin } from "./AdminTypes";
 import { authStore } from "../../auth/authStore";
 import { createAdmin, deactivateAdmin, listAdmins, listRoles, updateAdmin } from "../../api/adminManagement";
+import { getRecord, getString, isRecord } from "../../../shared/typeGuards";
 
 /**
  * Admins Management Module
@@ -18,7 +19,8 @@ import { createAdmin, deactivateAdmin, listAdmins, listRoles, updateAdmin } from
 
 export function AdminsModule() {
   const [admins, setAdmins] = useState<Admin[]>([]);
-  const [roles, setRoles] = useState<{ name: string; description?: string }[]>([]);
+  type RoleOption = { name: string; description?: string };
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -29,23 +31,36 @@ export function AdminsModule() {
 
   const canManageAdmins = authStore.hasPermission("admin.admins.manage");
 
-  const load = async () => {
+  const getErrorMessage = (err: unknown): string => {
+    if (err instanceof Error && err.message) return err.message;
+    if (isRecord(err)) {
+      const message = getString(err.message);
+      if (message) return message;
+
+      const nested = getRecord(err.error);
+      const nestedMessage = nested ? getString(nested.message) : undefined;
+      if (nestedMessage) return nestedMessage;
+    }
+    return "Unknown error";
+  };
+
+  const load = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const [adminsRes, rolesRes] = await Promise.all([listAdmins(), listRoles()]);
-      setAdmins(adminsRes as any);
+      setAdmins(adminsRes);
       setRoles(rolesRes.map((r) => ({ name: r.name, description: r.description })));
-    } catch (e: any) {
-      setError(e?.message || "Failed to load admins");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || "Failed to load admins");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
 
   // Filter admins
   const filteredAdmins = useMemo(() => admins.filter((admin) => {
@@ -81,8 +96,8 @@ export function AdminsModule() {
     try {
       await deactivateAdmin(id);
       await load();
-    } catch (e: any) {
-      alert(e?.message || "Failed to deactivate admin");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || "Failed to deactivate admin");
     }
   };
 
@@ -93,8 +108,8 @@ export function AdminsModule() {
     try {
       await updateAdmin(id, { isActive: !target.is_active });
       await load();
-    } catch (e: any) {
-      alert(e?.message || "Failed to update status");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || "Failed to update status");
     }
   };
 
@@ -109,8 +124,8 @@ export function AdminsModule() {
       setShowForm(false);
       setEditingAdmin(null);
       await load();
-    } catch (e: any) {
-      alert(e?.message || "Failed to save admin");
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || "Failed to save admin");
     }
   };
 

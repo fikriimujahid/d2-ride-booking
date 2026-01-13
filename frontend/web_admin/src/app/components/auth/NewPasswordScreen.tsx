@@ -4,7 +4,7 @@ import type { ApiError } from "../../api/types";
 import { useAuth } from "../../auth/AuthContext";
 
 export function NewPasswordScreen() {
-  const { submitNewPassword, logout } = useAuth();
+  const { logout } = useAuth();
 
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -23,7 +23,9 @@ export function NewPasswordScreen() {
 
     try {
       setIsSubmitting(true);
-      await submitNewPassword(password);
+      // This screen is not currently wired to a backend password-reset endpoint.
+      // Keep behavior explicit instead of calling a non-existent auth method.
+      throw new Error("Password update is not available in this build.");
     } catch (e) {
       const err = e as ApiError;
       setError(err?.message || "Failed to update password. Please try again.");

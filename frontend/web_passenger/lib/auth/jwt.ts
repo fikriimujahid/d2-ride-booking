@@ -1,4 +1,7 @@
-type JwtPayload = Record<string, unknown>
+import { z } from "zod"
+
+const JwtPayloadSchema = z.record(z.string(), z.unknown())
+export type JwtPayload = z.infer<typeof JwtPayloadSchema>
 
 function base64UrlDecodeToString(value: string) {
   const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
@@ -11,7 +14,8 @@ export function decodeJwtPayload(token: string): JwtPayload {
   const parts = token.split(".")
   if (parts.length !== 3) throw new Error("Invalid JWT")
   const json = base64UrlDecodeToString(parts[1] ?? "")
-  return JSON.parse(json) as JwtPayload
+  const raw: unknown = JSON.parse(json)
+  return JwtPayloadSchema.parse(raw)
 }
 
 export function getJwtExpSeconds(token: string): number | null {

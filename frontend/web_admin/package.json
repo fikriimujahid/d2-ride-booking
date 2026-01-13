@@ -4,10 +4,12 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "npm run typecheck && vite build",
+    "build:s3": "npm run typecheck && vite build && node scripts/postbuild-s3.mjs",
     "dev": "vite",
     "lint": "eslint \"src/**/*.{ts,tsx}\" \"vite.config.ts\" \"vitest.config.ts\" --max-warnings=0",
     "typecheck": "tsc --noEmit",
+    "typecheck:full": "tsc -p tsconfig.full.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

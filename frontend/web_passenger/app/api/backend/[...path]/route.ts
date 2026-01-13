@@ -2,9 +2,15 @@ import { NextResponse, type NextRequest } from "next/server"
 import { cookies } from "next/headers"
 import { AUTH_COOKIES } from "@/lib/auth/cookies"
 import { clearAuthCookies } from "@/lib/auth/tokenStore"
+import { TokenResponseSchema } from "@/lib/auth/schemas"
 import { passengerRefresh } from "@/lib/auth/upstream"
 
 const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const
+type SupportedMethod = (typeof SUPPORTED_METHODS)[number]
+
+function isSupportedMethod(method: string): method is SupportedMethod {
+  return (SUPPORTED_METHODS as readonly string[]).includes(method)
+}
 
 async function rotateTokens() {
   const store = await cookies()
@@ -14,9 +20,10 @@ async function rotateTokens() {
   const { res: upstream, payload } = await passengerRefresh({ refreshToken })
   if (!upstream.ok) return false
 
-  const accessToken = (payload as any)?.accessToken
-  const newRefreshToken = (payload as any)?.refreshToken
-  if (typeof accessToken !== "string" || typeof newRefreshToken !== "string") return false
+  const tokenParsed = TokenResponseSchema.safeParse(payload)
+  if (!tokenParsed.success) return false
+
+  const { accessToken, refreshToken: newRefreshToken } = tokenParsed.data
 
   const { setAuthCookies } = await import("@/lib/auth/tokenStore")
   await setAuthCookies({ accessToken, refreshToken: newRefreshToken })
@@ -24,7 +31,17 @@ async function rotateTokens() {
 }
 
 async function proxy(req: NextRequest, params: { path: string[] }) {
-  const baseUrl = process.env.BACKEND_API_BASE_URL ?? process.env.AUTH_API_BASE_URL
+  const baseA = process.env.BACKEND_API_BASE_URL
+  const baseB = process.env.AUTH_API_BASE_URL
+
+  if (baseA && baseB && baseA !== baseB) {
+    return NextResponse.json(
+      { message: "BACKEND_API_BASE_URL and AUTH_API_BASE_URL must match" },
+      { status: 500 }
+    )
+  }
+
+  const baseUrl = baseA ?? baseB
   if (!baseUrl) {
     return NextResponse.json(
       { message: "Missing BACKEND_API_BASE_URL (or AUTH_API_BASE_URL as fallback)" },
@@ -33,7 +50,7 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
   }
 
   const method = req.method.toUpperCase()
-  if (!SUPPORTED_METHODS.includes(method as any)) {
+  if (!isSupportedMethod(method)) {
     return NextResponse.json({ message: "Method not allowed" }, { status: 405 })
   }
 
@@ -47,7 +64,7 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
   const url = new URL(`${baseUrl.replace(/\/$/, "")}/${params.path.join("/")}`)
   url.search = req.nextUrl.search
 
-  const hasBody = method !== "GET" && method !== "HEAD"
+  const hasBody = method !== "GET"
   const bodyText = hasBody ? await req.text() : undefined
 
   const makeUpstream = async (token: string) => {
@@ -88,8 +105,8 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
 
   const contentType = upstream.headers.get("content-type") ?? ""
   if (contentType.includes("application/json")) {
-    const body = await upstream.json().catch(() => ({}))
-    return NextResponse.json(body as any, { status: upstream.status })
+    const body: unknown = await upstream.json().catch(() => ({}))
+    return NextResponse.json(body, { status: upstream.status })
   }
 
   const body = await upstream.text()

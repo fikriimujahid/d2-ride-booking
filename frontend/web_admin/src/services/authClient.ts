@@ -1,37 +1,26 @@
 /**
  * Auth Client - Centralized Authentication Service
- * 
- * This module handles all authentication operations for the Web Admin:
+ *
+ * This module handles authentication operations for Web Admin:
  * - Admin login with email/password
- * - TOTP 2FA enrollment and verification
  * - Token refresh with rotation
  * - Secure token storage (sessionStorage to reduce XSS blast radius)
  * - Logout
- * 
- * SECURITY NOTES:
- * 1. Only Admin users (system_role=ADMIN) can authenticate
- * 2. All Admin logins require TOTP 2FA
- * 3. Tokens stored in sessionStorage (cleared on tab close)
- * 4. Access tokens have short TTL; refresh tokens rotate on use
- * 5. Backend enforces Origin allowlist for Admin endpoints
+ *
+ * Backend contract (admin):
+ * - POST /api/v1/admin/auth/login   { email, password } -> { accessToken, refreshToken, expiresAt }
+ * - POST /api/v1/admin/auth/refresh { refreshToken }    -> { accessToken, refreshToken, expiresAt }
+ * - POST /api/v1/admin/auth/logout  { refreshToken }    -> { ok: true }
  */
 
 import { authStore, type AuthState } from "../app/auth/authStore";
-import type { AuthUser, AdminContext } from "../app/api/types";
+import type { AuthUser } from "../app/api/types";
+import { getApiBaseUrl } from "../config/apiBaseUrl";
+import { safeJsonParse } from "../shared/json";
+import { getNumber, getRecord, getString, isRecord } from "../shared/typeGuards";
 
 // Backend auth API base
-const getAuthApiBase = () => {
-  const base =
-    import.meta.env.VITE_API_BASE_URL ||
-    (import.meta.env.DEV ? 'http://localhost:3000' : '');
-  return base.replace(/\/$/, '');
-};
-
-// ===== Type Definitions =====
-
-type LoginResponse =
-  | { mfaRequired: true; mfaToken: string }
-  | { error: 'TWO_FACTOR_ENROLLMENT_REQUIRED'; enrollToken: string };
+const getAuthApiBase = () => getApiBaseUrl();
 
 type TokenResponse = {
   accessToken: string;
@@ -39,21 +28,50 @@ type TokenResponse = {
   expiresAt: string; // ISO timestamp
 };
 
-type UserInfoResponse = {
-  id: string;
-  email: string;
-  system_role: string;
-  roles: string[];
-  permissions: string[];
+type DecodedJwtPayload = {
+  sub?: string;
+  role?: string;
+  exp?: number;
+  typ?: string;
 };
 
-type EnrollmentSetupResponse = {
-  secret: string;
-  otpauthUri: string;
-};
+function parseTokenResponse(value: unknown): TokenResponse {
+  const rec = getRecord(value);
+  const accessToken = rec ? getString(rec.accessToken) : undefined;
+  const refreshToken = rec ? getString(rec.refreshToken) : undefined;
+  const expiresAt = rec ? getString(rec.expiresAt) : undefined;
 
-// NOTE: We intentionally do NOT decode JWTs for roles/permissions.
-// JWTs are authentication tokens; authorization data comes from GET /admin/me.
+  if (!accessToken || !refreshToken || !expiresAt) {
+    throw new Error("Unexpected auth response from server");
+  }
+
+  return { accessToken, refreshToken, expiresAt };
+}
+
+function extractErrorMessageFromBody(body: unknown, status: number): string {
+  if (typeof body === "string" && body.trim()) return body;
+
+  if (isRecord(body)) {
+    const msg = getString(body.message);
+    if (msg) return msg;
+
+    if (Array.isArray(body.message)) {
+      const joined = body.message
+        .filter((x): x is string => typeof x === "string")
+        .join("\n");
+      if (joined) return joined;
+    }
+
+    const err = getRecord(body.error);
+    const errMessage = err ? getString(err.message) : undefined;
+    if (errMessage) return errMessage;
+
+    const errCode = getString(body.error);
+    if (errCode) return errCode;
+  }
+
+  return `Request failed with status ${status}`;
+}
 
 // ===== Helper: API request with error handling =====
 
@@ -71,30 +89,51 @@ async function authFetch<T>(
   const response = await fetch(url, {
     ...options,
     headers,
-    credentials: 'include' // Include cookies if backend uses them
+    credentials: 'include' // OK even if backend is token-only
   });
 
   const contentType = response.headers.get('content-type');
   const isJson = contentType?.includes('application/json');
-  
-  let data: any;
-  if (isJson) {
-    data = await response.json();
-  } else {
-    data = await response.text();
-  }
+
+  const data: unknown = isJson
+    ? await response.json().catch(() => undefined)
+    : await response.text().catch(() => undefined);
 
   if (!response.ok) {
-    // Handle error responses
-    const message = 
-      data?.message || 
-      data?.error || 
-      (typeof data === 'string' ? data : `Request failed with status ${response.status}`);
-    
+    const message = extractErrorMessageFromBody(data, response.status);
     throw new Error(message);
   }
 
   return data as T;
+}
+
+function base64UrlDecodeToString(input: string): string {
+  const pad = "=".repeat((4 - (input.length % 4)) % 4);
+  const base64 = (input + pad).replace(/-/g, "+").replace(/_/g, "/");
+  // atob is available in browsers; vitest/jsdom provides it too.
+  const binary = globalThis.atob(base64);
+  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function decodeJwtPayload(token: string): DecodedJwtPayload {
+  const parts = token.split(".");
+  if (parts.length !== 3) return {};
+  try {
+    const json = base64UrlDecodeToString(parts[1]);
+    const parsed = safeJsonParse(json);
+    const rec = getRecord(parsed);
+    if (!rec) return {};
+
+    return {
+      sub: getString(rec.sub),
+      role: getString(rec.role),
+      exp: getNumber(rec.exp),
+      typ: getString(rec.typ),
+    };
+  } catch {
+    return {};
+  }
 }
 
 // ===== Auth Client Interface =====
@@ -102,128 +141,17 @@ async function authFetch<T>(
 export const authClient = {
   /**
    * Admin login - Step 1: Email + Password
-   * 
-   * Returns either:
-   * - { next: 'MFA_VERIFY', mfaToken } if 2FA already enrolled
-   * - { next: 'MFA_SETUP', enrollToken } if 2FA enrollment required
-   * 
-   * SECURITY: Backend validates system_role=ADMIN and Origin
+   *
+   * On success, stores tokens and basic user info in authStore.
    */
-  async login(email: string, password: string): Promise<
-    | { next: 'MFA_VERIFY'; mfaToken: string }
-    | { next: 'MFA_SETUP'; enrollToken: string }
-  > {
-    const url = `${getAuthApiBase()}/admin/auth/login`;
-    
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+  async login(email: string, password: string): Promise<void> {
+    const response = await authFetch<unknown>("/admin/auth/login", {
+      method: "POST",
       body: JSON.stringify({ email, password }),
-      credentials: 'include'
     });
 
-    const data = await response.json();
-
-    // Backend returns 200 with { mfaRequired: true, mfaToken } for enrolled users
-    if (response.ok && data.mfaToken) {
-      return { next: 'MFA_VERIFY', mfaToken: data.mfaToken };
-    }
-
-    // Backend returns 428 with { error: 'TWO_FACTOR_ENROLLMENT_REQUIRED', enrollToken }
-    if (response.status === 428 && data.enrollToken) {
-      return { next: 'MFA_SETUP', enrollToken: data.enrollToken };
-    }
-
-    // Handle errors
-    if (!response.ok) {
-      const message = data?.message || data?.error || `Login failed with status ${response.status}`;
-      throw new Error(message);
-    }
-
-    throw new Error('Unexpected login response');
-  },
-
-  /**
-   * Get TOTP enrollment setup (QR code + secret)
-   * 
-   * Called when user needs to enroll 2FA for the first time
-   */
-  async getEnrollmentSetup(enrollToken: string): Promise<{
-    secret: string;
-    qrCodeDataUrl: string;
-  }> {
-    const response = await authFetch<EnrollmentSetupResponse>('/admin/auth/2fa/setup', {
-      method: 'POST',
-      body: JSON.stringify({ enrollToken })
-    });
-
-    // Convert otpauthUri to QR code data URL
-    // In production, use a QR code library (qrcode package)
-    // For now, return the URI - frontend can render it
-    const qrCodeDataUrl = await this.generateQrCode(response.otpauthUri);
-
-    return {
-      secret: response.secret,
-      qrCodeDataUrl
-    };
-  },
-
-  /**
-   * Generate QR code data URL from otpauthUri
-   * Uses qrcode library (should be installed: npm install qrcode)
-   */
-  async generateQrCode(text: string): Promise<string> {
-    try {
-      // Dynamic import to avoid bundling if not needed
-      const QRCode = await import('qrcode');
-      return await QRCode.toDataURL(text);
-    } catch {
-      // Fallback: return text-based representation or empty
-      console.warn('QRCode library not available, returning placeholder');
-      return `data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"><text x="10" y="20">QR Code: ${encodeURIComponent(text)}</text></svg>`;
-    }
-  },
-
-  /**
-   * Confirm TOTP enrollment with first valid code
-   * 
-   * On success, stores tokens and user in authStore
-   */
-  async confirmEnrollment(params: {
-    email: string;
-    enrollToken: string;
-    code: string;
-  }): Promise<void> {
-    const response = await authFetch<TokenResponse>('/admin/auth/2fa/confirm', {
-      method: 'POST',
-      body: JSON.stringify({
-        enrollToken: params.enrollToken,
-        code: params.code
-      })
-    });
-
-    await this.storeTokens(response);
-  },
-
-  /**
-   * Verify TOTP code during login
-   * 
-   * On success, stores tokens and user in authStore
-   */
-  async verifyMfa(params: {
-    email: string;
-    mfaToken: string;
-    code: string;
-  }): Promise<void> {
-    const response = await authFetch<TokenResponse>('/admin/auth/verify-2fa', {
-      method: 'POST',
-      body: JSON.stringify({
-        mfaToken: params.mfaToken,
-        code: params.code
-      })
-    });
-
-    await this.storeTokens(response);
+    const tokens = parseTokenResponse(response);
+    await this.storeTokens({ tokens, email });
   },
 
   /**
@@ -238,12 +166,16 @@ export const authClient = {
       throw new Error('No refresh token available');
     }
 
-    const response = await authFetch<TokenResponse>('/admin/auth/refresh', {
+    const response = await authFetch<unknown>('/admin/auth/refresh', {
       method: 'POST',
       body: JSON.stringify({ refreshToken: currentRefreshToken })
     });
 
-    await this.storeTokens(response);
+    const tokens = parseTokenResponse(response);
+
+    const prior = authStore.get();
+    const email = prior?.user?.email;
+    await this.storeTokens({ tokens, email });
   },
 
   /**
@@ -251,8 +183,8 @@ export const authClient = {
    */
   async logout(): Promise<void> {
     const refreshToken = authStore.getRefreshToken();
-    
-    // Always clear local state
+
+    // Always clear local state (fail-closed)
     authStore.clear();
 
     // Best-effort revoke on backend
@@ -280,38 +212,13 @@ export const authClient = {
       throw new Error('No stored auth state');
     }
 
-    // Check if access token is expired
-    const expiresAt = new Date(state.expires_at);
+    // Check if access token is expired based on stored expires_at.
+    // If missing, treat as expired and attempt refresh.
+    const expiresAt = new Date(state.expires_at || 0);
     const now = new Date();
-    
-    if (expiresAt <= now) {
-      // Access token expired, try to refresh first.
+    if (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime()) || expiresAt <= now) {
       await this.refresh();
     }
-
-    // Always refresh admin context on app init.
-    // This keeps permissions up-to-date without embedding them in tokens.
-    const adminContext = await this.fetchAdminContext();
-
-    const stored = authStore.get();
-    if (!stored) throw new Error('Missing stored auth state');
-
-    const user: AuthUser = {
-      id: adminContext.identity.id,
-      email: adminContext.identity.email,
-      system_role: 'ADMIN',
-      roles: adminContext.roles,
-      permissions: adminContext.permissions
-    };
-
-    const next: AuthState = {
-      access_token: stored.access_token,
-      refresh_token: stored.refresh_token,
-      expires_at: stored.expires_at,
-      user,
-      adminContext
-    };
-    authStore.set(next);
   },
 
   /**
@@ -322,112 +229,48 @@ export const authClient = {
   },
 
   /**
-   * Fetch admin context from GET /admin/me
-   * 
-   * This is the SINGLE SOURCE OF TRUTH for admin permissions.
-   * Call ONCE after successful login/2FA to populate authStore.
-   * 
-   * @returns AdminContext with identity, roles, and permissions
+   * Internal: Store tokens and create minimal AuthUser.
+   *
+   * Note: backend currently returns only tokens (no /admin/me context).
+   * For UX gating, we grant a wildcard permission "*" and rely on backend
+   * authorization for real enforcement.
    */
-  async fetchAdminContext(): Promise<AdminContext> {
-    const accessToken = authStore.getAccessToken();
-    if (!accessToken) {
-      throw new Error('No access token available');
-    }
+  async storeTokens(params: { tokens: TokenResponse; email?: string | null }): Promise<void> {
+    const { tokens, email } = params;
 
-    const response = await authFetch<AdminContext>('/admin/me', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    });
-
-    return response;
-  },
-
-  /**
-   * @deprecated Use fetchAdminContext() instead
-   * Fetch current user info from /admin/me
-   * Requires valid access token in authStore
-   */
-  async fetchUserInfo(): Promise<AuthUser> {
-    const accessToken = authStore.getAccessToken();
-    if (!accessToken) {
-      throw new Error('No access token available');
-    }
-
-    const response = await authFetch<UserInfoResponse>('/admin/me', {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
-    });
-
-    return {
-      id: response.id,
-      email: response.email,
-      system_role: response.system_role as 'ADMIN' | 'DRIVER' | 'PASSENGER',
-      roles: response.roles,
-      permissions: response.permissions
-    };
-  },
-
-  /**
-   * Internal: Store tokens and fetch admin context
-   * 
-   * WORKFLOW:
-   * 1. Store tokens in authStore
-   * 2. Fetch AdminContext from GET /admin/me
-   * 3. Verify user is ADMIN
-   * 4. Update authStore with complete AdminContext
-   * 
-   * SECURITY NOTES:
-   * - Tokens stored in sessionStorage (cleared on tab close)
-   * - Fetches admin context from /admin/me after storing tokens
-   * - Verify user is ADMIN before storing
-   * - Never log tokens
-   */
-  async storeTokens(response: TokenResponse): Promise<void> {
-    // First store the tokens temporarily
-    const tempState: AuthState = {
-      access_token: response.accessToken,
-      refresh_token: response.refreshToken,
-      expires_at: response.expiresAt,
-      user: null as any // Temporary, will be updated
-    };
-    authStore.set(tempState);
-
-    try {
-      // Fetch admin context using the access token
-      const adminContext = await this.fetchAdminContext();
-
-      // SECURITY: /admin/me should already be protected by backend.
-      // If a non-admin somehow reaches here, treat it as an auth failure.
-      // (We cannot validate role from AdminContext.identity because it contains no role field.)
-
-      // Build legacy AuthUser for backward compatibility
-      const user: AuthUser = {
-        id: adminContext.identity.id,
-        email: adminContext.identity.email,
-        system_role: 'ADMIN',
-        roles: adminContext.roles,
-        permissions: adminContext.permissions
-      };
-
-      // Update with complete admin context
-      const authState: AuthState = {
-        access_token: response.accessToken,
-        refresh_token: response.refreshToken,
-        expires_at: response.expiresAt,
-        user,
-        adminContext // NEW: Store the full AdminContext
-      };
-
-      authStore.set(authState);
-    } catch (error) {
-      // If fetching admin context fails, clear tokens
+    const decoded = decodeJwtPayload(tokens.accessToken);
+    const userId = typeof decoded.sub === "string" ? decoded.sub : "";
+    const role = typeof decoded.role === "string" ? decoded.role : "ADMIN";
+    if (role !== "ADMIN") {
       authStore.clear();
-      throw error;
+      throw new Error("Only ADMIN users can sign in to Web Admin");
     }
-  }
+
+    const accessExpMs = typeof decoded.exp === "number" ? decoded.exp * 1000 : Date.now();
+    const expiresAt = new Date(accessExpMs).toISOString();
+
+    const safeEmail = (email || authStore.getUser()?.email || "").toString();
+
+    const user: AuthUser = {
+      id: userId,
+      email: safeEmail,
+      system_role: "ADMIN",
+      roles: ["admin"],
+      permissions: ["*"],
+    };
+
+    const authState: AuthState = {
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
+      expires_at: expiresAt,
+      user,
+      adminContext: {
+        identity: { id: userId, email: safeEmail },
+        roles: user.roles,
+        permissions: user.permissions,
+      },
+    };
+
+    authStore.set(authState);
+  },
 };
