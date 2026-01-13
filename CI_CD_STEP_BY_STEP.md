@@ -385,13 +385,13 @@ git push -u origin feature/add-new-endpoint
 2. Base branch: `dev` ← compare: `feature/add-new-endpoint`
 3. Click "Create pull request"
 
-**GitHub Actions IMMEDIATELY triggers CI workflow** (`.github/workflows/ci-dev.yml`)
+**GitHub Actions IMMEDIATELY triggers CI workflow** (`.github/workflows/deploy-dev.yml`)
 
 ---
 
 ## Phase 4: CI Pipeline Executes (Automated)
 
-**Workflow file**: `.github/workflows/ci-dev.yml`
+**Workflow file**: `.github/workflows/deploy-dev.yml`
 
 **Trigger**: `pull_request` targeting `dev` OR `push` to `dev`
 
@@ -802,7 +802,7 @@ sudo systemctl restart d2-backend.service
 ├─────────────────────────────────────────────────────────────────┤
 │ 1. Developer creates feature branch                             │
 │ 2. Developer opens PR to dev                                    │
-│    → Triggers CI workflow (.github/workflows/ci-dev.yml)        │
+│    → Triggers CI workflow (.github/workflows/deploy-dev.yml)    │
 │       ├─ Secret scan (gitleaks)                                 │
 │       ├─ Dependency scan (trivy)                                │
 │       ├─ Backend: lint, build, test, audit                      │
@@ -816,7 +816,7 @@ sudo systemctl restart d2-backend.service
 ┌─────────────────────────────────────────────────────────────────┐
 │ PHASE 3: AUTOMATED DEPLOYMENT                                   │
 ├─────────────────────────────────────────────────────────────────┤
-│ Merge to dev → Triggers deploy workflow (deploy-dev.yml)        │
+│ Merge to dev → Triggers deploy workflow (deploy-dev.yml)       │
 │                                                                  │
 │ BUILD JOB:                                                       │
 │ 1. npm run build (backend, web_admin, web_driver, web_passenger)│
@@ -863,7 +863,7 @@ sudo systemctl restart d2-backend.service
 
 | File | Purpose | Where it Runs |
 |------|---------|---------------|
-| `.github/workflows/ci-dev.yml` | Run tests/scans on PRs | GitHub Actions |
+| `.github/workflows/deploy-dev.yml` | Run tests/scans on PRs | GitHub Actions |
 | `.github/workflows/deploy-dev.yml` | Build + deploy after merge | GitHub Actions |
 | `infra/deploy/package-artifacts.sh` | Package code into .tgz files | GitHub Actions |
 | `infra/ec2/ssm-deploy` | Deploy new release on EC2 | **EC2 (installed at /usr/local/bin/)** |

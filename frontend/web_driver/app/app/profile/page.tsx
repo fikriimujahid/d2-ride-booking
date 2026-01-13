@@ -2,6 +2,7 @@
 
 import { mockDriver } from "@/lib/mock-data"
 import { Mail, Phone, Car, CreditCard, Edit2, LogOut } from "lucide-react"
+import Image from "next/image"
 import { useState } from "react"
 
 export default function ProfilePage() {
@@ -22,10 +23,13 @@ export default function ProfilePage() {
         <div className="px-6 py-8 relative">
           {/* Profile Image */}
           <div className="absolute -top-16 left-6">
-            <img
+            <Image
               src={mockDriver.profileImage || "/placeholder.svg"}
               alt={mockDriver.name}
+              width={128}
+              height={128}
               className="w-32 h-32 rounded-full border-4 border-card bg-border"
+              priority
             />
           </div>
 

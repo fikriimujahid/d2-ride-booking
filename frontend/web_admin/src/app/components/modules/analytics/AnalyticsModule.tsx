@@ -113,7 +113,10 @@ export function AnalyticsModule() {
             <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
             <Tooltip 
               contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-              formatter={(value: number) => ['$' + value.toLocaleString(), 'Revenue']}
+              formatter={(value: number | string | undefined) => {
+                const amount = typeof value === 'number' ? value : Number(value ?? 0);
+                return [`$${amount.toLocaleString()}`, 'Revenue'];
+              }}
             />
             <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorRevenue)" />
           </AreaChart>
@@ -132,7 +135,10 @@ export function AnalyticsModule() {
               <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
               <Tooltip 
                 contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
-                formatter={(value: number) => [value.toLocaleString() + ' rides', 'Total']}
+                formatter={(value: number | string | undefined) => {
+                  const rides = typeof value === 'number' ? value : Number(value ?? 0);
+                  return [`${rides.toLocaleString()} rides`, 'Total'];
+                }}
               />
               <Bar dataKey="rides" fill="#3b82f6" radius={[8, 8, 0, 0]} />
             </BarChart>
@@ -160,7 +166,7 @@ export function AnalyticsModule() {
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(value: number) => `${value}%`} />
+                <Tooltip formatter={(value: number | string | undefined) => `${Number(value ?? 0)}%`} />
               </PieChart>
             </ResponsiveContainer>
           </div>

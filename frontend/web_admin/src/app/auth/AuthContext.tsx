@@ -12,32 +12,14 @@ import { authClient } from "../../services/authClient";
 
 export type AuthStatus =
   | "UNAUTHENTICATED"
-  | "MFA_SETUP_REQUIRED"
-  | "MFA_VERIFICATION_REQUIRED"
   | "AUTHENTICATED";
-
-type PendingMfaSetup = {
-  email: string;
-  enrollToken: string;
-  qrCodeUri: string;
-  secret: string;
-};
-
-type PendingMfaVerify = {
-  email: string;
-  mfaToken: string;
-};
 
 type AuthContextValue = {
   status: AuthStatus;
   isBootstrapping: boolean;
   user: AuthUser | null;
 
-  pendingMfaSetup: PendingMfaSetup | null;
-  pendingMfaVerify: PendingMfaVerify | null;
-
   loginWithPassword: (email: string, password: string) => Promise<AuthStatus>;
-  submitTotpCode: (code: string) => Promise<AuthStatus>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
 };
@@ -48,27 +30,18 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("UNAUTHENTICATED");
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
-  const [pendingMfaSetup, setPendingMfaSetup] = useState<PendingMfaSetup | null>(null);
-  const [pendingMfaVerify, setPendingMfaVerify] = useState<PendingMfaVerify | null>(null);
-
   const [user, setUser] = useState<AuthUser | null>(authStore.getUser());
 
   const hasPermission = useCallback((permission: string) => {
     return authStore.hasPermission(permission);
   }, []);
 
-  const clearPending = useCallback(() => {
-    setPendingMfaSetup(null);
-    setPendingMfaVerify(null);
-  }, []);
-
   const logout = useCallback(() => {
-    clearPending();
     // Best-effort server-side logout; always clear local state.
     void authClient.logout();
     setUser(null);
     setStatus("UNAUTHENTICATED");
-  }, [clearPending]);
+  }, []);
 
   // Init from store
   useEffect(() => {
@@ -100,75 +73,25 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const loginWithPassword = useCallback(async (email: string, password: string): Promise<AuthStatus> => {
-    clearPending();
-    const result = await authClient.login(email, password);
-
-    if (result.next === "MFA_VERIFY") {
-      setPendingMfaVerify({ email, mfaToken: result.mfaToken });
-      setStatus("MFA_VERIFICATION_REQUIRED");
-      return "MFA_VERIFICATION_REQUIRED";
-    }
-
-    const setup = await authClient.getEnrollmentSetup(result.enrollToken);
-    setPendingMfaSetup({
-      email,
-      enrollToken: result.enrollToken,
-      qrCodeUri: setup.qrCodeDataUrl,
-      secret: setup.secret,
-    });
-    setStatus("MFA_SETUP_REQUIRED");
-    return "MFA_SETUP_REQUIRED";
-  }, [clearPending]);
-
-  const submitTotpCode = useCallback(async (code: string): Promise<AuthStatus> => {
-    if (pendingMfaSetup) {
-      await authClient.confirmEnrollment({
-        email: pendingMfaSetup.email,
-        enrollToken: pendingMfaSetup.enrollToken,
-        code,
-      });
-
-      setUser(authStore.getUser());
-      clearPending();
-      setStatus("AUTHENTICATED");
-      return "AUTHENTICATED";
-    }
-
-    if (pendingMfaVerify) {
-      await authClient.verifyMfa({
-        email: pendingMfaVerify.email,
-        mfaToken: pendingMfaVerify.mfaToken,
-        code,
-      });
-
-      setUser(authStore.getUser());
-      clearPending();
-      setStatus("AUTHENTICATED");
-      return "AUTHENTICATED";
-    }
-
-    throw new Error("No pending 2FA step");
-  }, [clearPending, pendingMfaSetup, pendingMfaVerify]);
+    await authClient.login(email, password);
+    setUser(authStore.getUser());
+    setStatus("AUTHENTICATED");
+    return "AUTHENTICATED";
+  }, []);
 
   const value = useMemo(() => ({
     status,
     isBootstrapping,
     user,
-    pendingMfaSetup,
-    pendingMfaVerify,
     hasPermission,
     loginWithPassword,
-    submitTotpCode,
     logout
   }), [
     status,
     isBootstrapping,
     user,
-    pendingMfaSetup,
-    pendingMfaVerify,
     hasPermission,
     loginWithPassword,
-    submitTotpCode,
     logout,
   ]);
 

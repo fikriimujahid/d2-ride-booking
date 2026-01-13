@@ -41,7 +41,7 @@ export default function DashboardPage() {
 
       {/* Today's Stats */}
       <div>
-        <h2 className="text-2xl font-bold text-foreground mb-4">Today's Summary</h2>
+        <h2 className="text-2xl font-bold text-foreground mb-4">Today&apos;s Summary</h2>
         <div className="grid md:grid-cols-4 gap-4">
           <StatCard label="Trips Completed" value={mockTodayStats.tripsCompleted} icon={<Zap />} />
           <StatCard label="Earnings" value={`$${mockTodayStats.earnings.toFixed(2)}`} icon={<DollarSign />} />

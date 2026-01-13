@@ -23,14 +23,6 @@ export function ProtectedRoute({ requiredPermission, children }: ProtectedRouteP
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (status === "MFA_SETUP_REQUIRED") {
-    return <Navigate to="/mfa/setup" replace />;
-  }
-
-  if (status === "MFA_VERIFICATION_REQUIRED") {
-    return <Navigate to="/mfa/verify" replace />;
-  }
-
   if (requiredPermission && !hasPermission(requiredPermission)) {
     return <Navigate to="/forbidden" replace />;
   }

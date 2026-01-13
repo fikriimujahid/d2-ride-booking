@@ -5,11 +5,12 @@ import type React from "react"
 import { Header } from "@/components/header"
 import { useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { driverLogin } from "@/lib/auth/client"
 
 export default function LoginPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -25,7 +26,7 @@ export default function LoginPage() {
         setError(result.message)
         return
       }
-      const next = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("next") : null
+      const next = searchParams.get("next")
       router.push(next || "/app")
     } finally {
       setSubmitting(false)
@@ -82,7 +83,7 @@ export default function LoginPage() {
             </form>
 
             <p className="text-center text-secondary mt-8">
-              Don't have an account?{" "}
+              Don&apos;t have an account?{" "}
               <Link href="/signup" className="text-primary font-semibold hover:underline">
                 Sign up
               </Link>

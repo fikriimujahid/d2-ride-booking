@@ -9,8 +9,6 @@ import {
 } from "react-router-dom";
 
 import { LoginScreen } from "./components/auth/LoginScreen";
-import { MfaSetupScreen } from "./components/auth/MfaSetupScreen";
-import { MfaVerifyScreen } from "./components/auth/MfaVerifyScreen";
 import { ForbiddenPage } from "./components/auth/ForbiddenPage";
 import { AdminShell } from "./components/layout/AdminShell";
 
@@ -63,30 +61,7 @@ function LoginRoute() {
 
   if (isBootstrapping) return <FullPageLoading />;
   if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
-  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
-  if (status === "MFA_VERIFICATION_REQUIRED") return <Navigate to="/mfa/verify" replace />;
   return <LoginScreen />;
-}
-
-function MfaSetupRoute() {
-  const { status, isBootstrapping, logout } = useAuth();
-
-  if (isBootstrapping) return <FullPageLoading />;
-
-  if (status === "MFA_SETUP_REQUIRED") return <MfaSetupScreen />;
-
-  if (status === "MFA_VERIFICATION_REQUIRED") return <Navigate to="/mfa/verify" replace />;
-  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
-  return <Navigate to="/login" replace />;
-}
-
-function MfaVerifyRoute() {
-  const { status, isBootstrapping } = useAuth();
-  if (isBootstrapping) return <FullPageLoading />;
-  if (status === "MFA_VERIFICATION_REQUIRED") return <MfaVerifyScreen />;
-  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
-  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
-  return <Navigate to="/login" replace />;
 }
 
 function AdminShellRoute() {
@@ -142,8 +117,6 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginRoute />} />
-        <Route path="/mfa/setup" element={<MfaSetupRoute />} />
-        <Route path="/mfa/verify" element={<MfaVerifyRoute />} />
         <Route path="/forbidden" element={<ForbiddenRoute />} />
         <Route
           path="/app"

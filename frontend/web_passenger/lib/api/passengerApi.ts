@@ -1,14 +1,13 @@
 "use client"
 
 import { ApiError, AuthRequiredError, ForbiddenError } from "./errors"
+import type { z } from "zod"
 
-type Json = Record<string, unknown> | Array<unknown> | string | number | boolean | null
-
-async function parseJsonSafe(res: Response): Promise<Json | undefined> {
+async function parseJsonSafe(res: Response): Promise<unknown | undefined> {
   const contentType = res.headers.get("content-type") ?? ""
   if (!contentType.includes("application/json")) return undefined
   try {
-    return (await res.json()) as Json
+    return await res.json()
   } catch {
     return undefined
   }
@@ -16,18 +15,18 @@ async function parseJsonSafe(res: Response): Promise<Json | undefined> {
 
 export async function passengerApiFetch<T>(
   path: string,
+  schema: z.ZodType<T>,
   init?: RequestInit
 ): Promise<T> {
-  const res = await fetch(`/api/backend${path.startsWith("/") ? "" : "/"}${path}`,
-    {
-      ...init,
-      credentials: "include",
-      headers: {
-        ...(init?.headers ?? {}),
-        "content-type": (init?.headers as Record<string, string> | undefined)?.["content-type"] ?? "application/json",
-      },
-    }
-  )
+  const url = `/api/backend${path.startsWith("/") ? "" : "/"}${path}`
+  const headers = new Headers(init?.headers)
+  if (!headers.has("content-type")) headers.set("content-type", "application/json")
+
+  const res = await fetch(url, {
+    ...init,
+    credentials: "include",
+    headers,
+  })
 
   if (res.status === 401) {
     const next = typeof window !== "undefined" ? encodeURIComponent(window.location.pathname + window.location.search) : ""
@@ -44,5 +43,11 @@ export async function passengerApiFetch<T>(
     throw new ApiError(`Request failed (${res.status})`, res.status, details)
   }
 
-  return (await res.json()) as T
+  const raw: unknown = await res.json()
+  const parsed = schema.safeParse(raw)
+  if (!parsed.success) {
+    throw new ApiError("Invalid JSON response", 502, parsed.error.flatten())
+  }
+
+  return parsed.data
 }
