@@ -1,3 +1,8 @@
+import 'client-only';
+
+import { getPublicApiBaseUrl } from '../config/apiBaseUrl';
+import type { z } from 'zod';
+
 export class ApiError extends Error {
   status: number;
   body: unknown;
@@ -22,18 +27,8 @@ async function parseResponseBody(res: Response) {
   return res.text().catch(() => null);
 }
 
-function getApiBaseUrl() {
-  const raw = process.env.NEXT_PUBLIC_AUTH_API_BASE_URL;
-  if (!raw) {
-    throw new Error(
-      'Missing NEXT_PUBLIC_AUTH_API_BASE_URL (e.g. https://api.example.com). This must be set at build time.'
-    );
-  }
-  return raw.replace(/\/$/, '');
-}
-
 function buildApiUrl(path: string) {
-  const base = getApiBaseUrl();
+  const base = getPublicApiBaseUrl();
   const normalized = path.startsWith('/') ? path : `/${path}`;
   return `${base}${normalized}`;
 }
@@ -41,11 +36,15 @@ function buildApiUrl(path: string) {
 function getStoredTokens(): { accessToken: string; refreshToken: string; expiresAt: string } | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem('d2_driver_tokens');
+    const raw = window.sessionStorage.getItem('d2_driver_tokens');
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.accessToken || !parsed?.refreshToken || !parsed?.expiresAt) return null;
-    return parsed;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    const p = parsed as Record<string, unknown>;
+    if (typeof p.accessToken !== 'string' || typeof p.refreshToken !== 'string' || typeof p.expiresAt !== 'string') {
+      return null;
+    }
+    return { accessToken: p.accessToken, refreshToken: p.refreshToken, expiresAt: p.expiresAt };
   } catch {
     return null;
   }
@@ -55,7 +54,7 @@ async function refreshOnce(): Promise<boolean> {
   const tokens = getStoredTokens();
   if (!tokens?.refreshToken) return false;
 
-  const res = await fetch(`${getApiBaseUrl()}/driver/auth/refresh`, {
+  const res = await fetch(`${getPublicApiBaseUrl()}/driver/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken: tokens.refreshToken }),
@@ -64,7 +63,7 @@ async function refreshOnce(): Promise<boolean> {
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.accessToken || !data?.refreshToken) {
     try {
-      window.localStorage.removeItem('d2_driver_tokens');
+      window.sessionStorage.removeItem('d2_driver_tokens');
     } catch {
       // ignore
     }
@@ -72,7 +71,7 @@ async function refreshOnce(): Promise<boolean> {
   }
 
   try {
-    window.localStorage.setItem('d2_driver_tokens', JSON.stringify(data));
+    window.sessionStorage.setItem('d2_driver_tokens', JSON.stringify(data));
   } catch {
     // ignore
   }
@@ -118,15 +117,31 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
 
   const body = await parseResponseBody(res);
   const message =
-    (body as any)?.message ??
-    (body as any)?.error ??
-    (typeof body === 'string' ? body : `Request failed (${res.status})`);
+    ((): string => {
+      const b: unknown = body;
+      if (typeof b === 'string' && b.trim()) return b;
+      if (b && typeof b === 'object') {
+        const obj = b as Record<string, unknown>;
+        if (typeof obj.message === 'string' && obj.message) return obj.message;
+        if (Array.isArray(obj.message)) {
+          const joined = obj.message.filter((x): x is string => typeof x === 'string').join('\n');
+          if (joined) return joined;
+        }
+        const err = obj.error;
+        if (err && typeof err === 'object') {
+          const e = err as Record<string, unknown>;
+          if (typeof e.message === 'string' && e.message) return e.message;
+        }
+        if (typeof err === 'string' && err) return err;
+      }
+      return `Request failed (${res.status})`;
+    })();
 
   if (res.status === 401) {
     // Centralized/global 401 handling for static site.
     if (typeof window !== 'undefined') {
       try {
-        window.localStorage.removeItem('d2_driver_tokens');
+        window.sessionStorage.removeItem('d2_driver_tokens');
       } catch {
         // ignore
       }
@@ -137,4 +152,20 @@ export async function apiFetch<T>(path: string, init: ApiFetchInit = {}): Promis
 
   if (res.status === 403) throw new ForbiddenError(message, 403, body);
   throw new ApiError(message, res.status, body);
+}
+
+export async function apiFetchJson<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  init: ApiFetchInit = {},
+): Promise<T> {
+  const body: unknown = await apiFetch<unknown>(path, init);
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    throw new ApiError('Invalid API response shape', 500, {
+      issues: parsed.error.issues,
+      body,
+    });
+  }
+  return parsed.data;
 }

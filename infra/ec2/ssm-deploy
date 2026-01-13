@@ -30,6 +30,31 @@ require_cmd tar
 require_cmd npm
 require_cmd systemctl
 
+# Optional secure runtime env management via SSM Parameter Store.
+# Instance role must allow ssm:GetParameter for this prefix.
+# Example parameters:
+#   /mern-bootstrap/backend.env
+#   /mern-bootstrap/web_passenger.env
+SSM_PARAMETER_PREFIX="${SSM_PARAMETER_PREFIX:-/mern-bootstrap}"
+
+maybe_sync_env_from_ssm() {
+  local name="$1"      # backend|web_passenger
+  local dest="$2"      # /etc/d2/backend.env
+  local param="$SSM_PARAMETER_PREFIX/${name}.env"
+
+  # Only attempt if ssm:GetParameter is allowed and parameter exists.
+  if aws ssm get-parameter --name "$param" --with-decryption --query 'Parameter.Value' --output text >/tmp/d2-env.$$ 2>/dev/null; then
+    mkdir -p "$(dirname "$dest")"
+    chmod 755 "$(dirname "$dest")" || true
+    mv /tmp/d2-env.$$ "$dest"
+    chmod 600 "$dest" || true
+    echo "Synced env: $param -> $dest"
+  else
+    rm -f /tmp/d2-env.$$ || true
+    echo "No env parameter found (or access denied): $param"
+  fi
+}
+
 print_stats() {
   echo "--- host stats ---"
   (command -v uptime >/dev/null 2>&1 && uptime) || true
@@ -198,6 +223,7 @@ fi
 systemctl daemon-reload || true
 
 if should_deploy "$BACKEND_KEY"; then
+  maybe_sync_env_from_ssm backend /etc/d2/backend.env
   systemctl restart d2-backend.service
 fi
 
@@ -206,6 +232,7 @@ if should_deploy "$WEB_DRIVER_KEY"; then
 fi
 
 if should_deploy "$WEB_PASSENGER_KEY"; then
+  maybe_sync_env_from_ssm web_passenger /etc/d2/web_passenger.env
   systemctl restart d2-web-passenger.service
 fi
 

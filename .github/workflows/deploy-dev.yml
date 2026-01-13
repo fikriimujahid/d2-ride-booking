@@ -1,0 +1,217 @@
+name: Deploy (dev)
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'backend/**'
+      - 'frontend/web_admin/**'
+      - 'frontend/web_driver/**'
+      - 'frontend/web_passenger/**'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      web_admin: ${{ steps.filter.outputs.web_admin }}
+      web_driver: ${{ steps.filter.outputs.web_driver }}
+      web_passenger: ${{ steps.filter.outputs.web_passenger }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect changed components
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            web_admin:
+              - 'frontend/web_admin/**'
+            web_driver:
+              - 'frontend/web_driver/**'
+            web_passenger:
+              - 'frontend/web_passenger/**'
+
+  deploy-ec2:
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.web_passenger == 'true'
+    environment: dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Build backend
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: backend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Build web_passenger (EC2 Node)
+        if: needs.changes.outputs.web_passenger == 'true'
+        working-directory: frontend/web_passenger
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+
+      - name: Package EC2 artifacts
+        run: |
+          set -euo pipefail
+          chmod +x infra/deploy/package-artifacts.sh
+
+          RELEASE_ID="${GITHUB_SHA}"
+          mkdir -p ./artifacts
+
+          COMPONENTS=()
+          if [[ "${{ needs.changes.outputs.backend }}" == "true" ]]; then
+            COMPONENTS+=(backend)
+          fi
+          if [[ "${{ needs.changes.outputs.web_passenger }}" == "true" ]]; then
+            COMPONENTS+=(web_passenger)
+          fi
+
+          if [[ ${#COMPONENTS[@]} -eq 0 ]]; then
+            echo "No EC2 components changed; skipping packaging."
+            exit 0
+          fi
+
+          infra/deploy/package-artifacts.sh "./artifacts" "$RELEASE_ID" "${COMPONENTS[@]}"
+
+      - name: Upload EC2 artifacts to S3
+        env:
+          BOOTSTRAP_BUCKET: ${{ vars.BOOTSTRAP_S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          RELEASE_ID="${GITHUB_SHA}"
+
+          if [[ "${{ needs.changes.outputs.backend }}" == "true" ]]; then
+            aws s3 cp "./artifacts/backend-${RELEASE_ID}.tgz" "s3://${BOOTSTRAP_BUCKET}/artifacts/backend-${RELEASE_ID}.tgz"
+          fi
+
+          if [[ "${{ needs.changes.outputs.web_passenger }}" == "true" ]]; then
+            aws s3 cp "./artifacts/web_passenger-${RELEASE_ID}.tgz" "s3://${BOOTSTRAP_BUCKET}/artifacts/web_passenger-${RELEASE_ID}.tgz"
+          fi
+
+      - name: Deploy to EC2 via SSM
+        env:
+          INSTANCE_ID: ${{ vars.BOOTSTRAP_INSTANCE_ID }}
+          BOOTSTRAP_BUCKET: ${{ vars.BOOTSTRAP_S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          RELEASE_ID="${GITHUB_SHA}"
+
+          BACKEND_KEY="skip"
+          WEB_PASSENGER_KEY="skip"
+
+          if [[ "${{ needs.changes.outputs.backend }}" == "true" ]]; then
+            BACKEND_KEY="artifacts/backend-${RELEASE_ID}.tgz"
+          fi
+
+          if [[ "${{ needs.changes.outputs.web_passenger }}" == "true" ]]; then
+            WEB_PASSENGER_KEY="artifacts/web_passenger-${RELEASE_ID}.tgz"
+          fi
+
+          aws ssm send-command \
+            --instance-ids "${INSTANCE_ID}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "d2 dev deploy ${RELEASE_ID}" \
+            --parameters commands="sudo /usr/local/bin/ssm-deploy ${BOOTSTRAP_BUCKET} ${RELEASE_ID} ${BACKEND_KEY} skip ${WEB_PASSENGER_KEY}" \
+            --output text
+
+  deploy-web-admin:
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.web_admin == 'true'
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Build web_admin (S3 static)
+        working-directory: frontend/web_admin
+        env:
+          VITE_API_BASE_URL: ${{ vars.WEB_ADMIN_API_BASE_URL }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build:s3
+
+      - name: Sync web_admin to S3
+        env:
+          ADMIN_BUCKET: ${{ vars.FRONTEND_ADMIN_BUCKET_NAME }}
+        run: |
+          aws s3 sync "frontend/web_admin/dist" "s3://${ADMIN_BUCKET}/" --delete
+
+  deploy-web-driver:
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.web_driver == 'true'
+    environment: dev
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+      - name: Build web_driver (S3 static export)
+        working-directory: frontend/web_driver
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.WEB_DRIVER_API_BASE_URL }}
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build:s3
+
+      - name: Sync web_driver to S3
+        env:
+          DRIVER_BUCKET: ${{ vars.FRONTEND_DRIVER_BUCKET_NAME }}
+        run: |
+          aws s3 sync "frontend/web_driver/out" "s3://${DRIVER_BUCKET}/" --delete

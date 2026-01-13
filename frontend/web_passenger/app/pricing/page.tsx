@@ -73,7 +73,7 @@ export default function PricingPage() {
               <strong className="text-foreground">Per mile:</strong> Cost for each mile traveled during your trip.
             </p>
             <p className="text-sm text-muted-foreground">
-              <strong className="text-foreground">Upfront pricing:</strong> You'll see the total estimated cost before
+              <strong className="text-foreground">Upfront pricing:</strong> You&apos;ll see the total estimated cost before
               you book. The final price may vary slightly based on the actual route taken.
             </p>
             <p className="text-sm text-muted-foreground">

@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import next from "eslint-config-next";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
@@ -8,6 +9,7 @@ export default tseslint.config(
     ignores: [".next/**", "node_modules/**", "out/**", "dist/**"],
   },
   js.configs.recommended,
+  ...next,
   ...tseslint.configs.recommended,
   {
     languageOptions: {
@@ -22,7 +24,7 @@ export default tseslint.config(
       "react-hooks": reactHooks,
     },
     rules: {
-      "@typescript-eslint/no-explicit-any": "off",
+      "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-unused-vars": [
         "error",
         {

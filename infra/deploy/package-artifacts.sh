@@ -18,14 +18,13 @@ fi
 mkdir -p "$OUT_DIR"
 
 pack_backend() {
-  local src="$ROOT_DIR/api/auth-api"
+  local src="$ROOT_DIR/backend"
   local out="$OUT_DIR/backend-$RELEASE_ID.tgz"
   tar -C "$src" -czf "$out" \
     dist \
     package.json \
     package-lock.json \
-    migrations \
-    README.md
+    README.md 2>/dev/null || true
   echo "$out"
 }
 

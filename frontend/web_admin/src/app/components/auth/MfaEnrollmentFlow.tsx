@@ -3,8 +3,13 @@ import { Car, Shield, Copy, CheckCircle2 } from "lucide-react";
 import { adminLogout, adminMfaSetup, adminMfaVerify } from "../../api/auth";
 import { authStore } from "../../auth/authStore";
 import type { ApiError } from "../../api/types";
+import { getRecord, getString, isRecord } from "../../../shared/typeGuards";
 
 type Step = "intro" | "scan" | "success";
+
+type MfaEnrollmentFlowProps = {
+  onDone: () => void;
+};
 
 function maskForDisplay(secret: string) {
   // Keep the full secret available for copy, but avoid giant UI if it's long.
@@ -12,7 +17,7 @@ function maskForDisplay(secret: string) {
   return `${secret.slice(0, 3)}…${secret.slice(-3)}`;
 }
 
-export function MfaEnrollmentFlow(props: { onDone: () => void }) {
+export function MfaEnrollmentFlow(props: MfaEnrollmentFlowProps) {
   const [step, setStep] = useState<Step>("intro");
 
   const forceLogoutToLogin = async () => {
@@ -122,8 +127,20 @@ function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => voi
 
         // Backend returns a ready-to-render QR data URL.
         // Support both shapes for safety.
-        const qr = (res as any).qr_code_uri ?? (res as any).qrCode;
-        const secretCode = (res as any).secret ?? (res as any).secretCode;
+        const qr = (() => {
+          if (!isRecord(res)) return undefined;
+          return getString(res.qr_code_uri) ?? getString(res.qrCode);
+        })();
+
+        const secretCode = (() => {
+          if (!isRecord(res)) return undefined;
+          return getString(res.secret) ?? getString(res.secretCode);
+        })();
+
+        if (!qr || !secretCode) {
+          setError("Unexpected response from server. Please try again.");
+          return;
+        }
 
         setSecret(secretCode);
         setQrCodeUri(qr);

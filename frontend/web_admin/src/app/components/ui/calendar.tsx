@@ -59,14 +59,18 @@ function Calendar({
         day_hidden: "invisible",
         ...classNames,
       }}
-      components={{
-        IconLeft: ({ className, ...props }) => (
-          <ChevronLeft className={cn("size-4", className)} {...props} />
-        ),
-        IconRight: ({ className, ...props }) => (
-          <ChevronRight className={cn("size-4", className)} {...props} />
-        ),
-      }}
+      components={
+        {
+          // react-day-picker component slot names have changed across major versions.
+          // Keep the runtime behavior while staying type-safe in this codebase.
+          IconLeft: ({ className }: { className?: string }) => (
+            <ChevronLeft className={cn("size-4", className)} />
+          ),
+          IconRight: ({ className }: { className?: string }) => (
+            <ChevronRight className={cn("size-4", className)} />
+          ),
+        } as unknown as React.ComponentProps<typeof DayPicker>["components"]
+      }
       {...props}
     />
   );
