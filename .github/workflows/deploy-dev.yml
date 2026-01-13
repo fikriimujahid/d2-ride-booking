@@ -63,8 +63,8 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
       - name: Build backend
         if: needs.changes.outputs.backend == 'true'
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload EC2 artifacts to S3
         env:
-          BOOTSTRAP_BUCKET: ${{ vars.BOOTSTRAP_S3_BUCKET }}
+          BOOTSTRAP_BUCKET: ${{ secrets.BOOTSTRAP_S3_BUCKET }}
         run: |
           set -euo pipefail
           RELEASE_ID="${GITHUB_SHA}"
@@ -122,8 +122,8 @@ jobs:
 
       - name: Deploy to EC2 via SSM
         env:
-          INSTANCE_ID: ${{ vars.BOOTSTRAP_INSTANCE_ID }}
-          BOOTSTRAP_BUCKET: ${{ vars.BOOTSTRAP_S3_BUCKET }}
+          INSTANCE_ID: ${{ secrets.BOOTSTRAP_INSTANCE_ID }}
+          BOOTSTRAP_BUCKET: ${{ secrets.BOOTSTRAP_S3_BUCKET }}
         run: |
           set -euo pipefail
           RELEASE_ID="${GITHUB_SHA}"
@@ -163,8 +163,8 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
       - name: Build web_admin (S3 static)
         working-directory: frontend/web_admin
@@ -177,7 +177,7 @@ jobs:
 
       - name: Sync web_admin to S3
         env:
-          ADMIN_BUCKET: ${{ vars.FRONTEND_ADMIN_BUCKET_NAME }}
+          ADMIN_BUCKET: ${{ secrets.FRONTEND_ADMIN_BUCKET_NAME }}
         run: |
           aws s3 sync "frontend/web_admin/dist" "s3://${ADMIN_BUCKET}/" --delete
 
@@ -198,8 +198,8 @@ jobs:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-region: ${{ vars.AWS_REGION }}
-          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
 
       - name: Build web_driver (S3 static export)
         working-directory: frontend/web_driver
@@ -212,6 +212,6 @@ jobs:
 
       - name: Sync web_driver to S3
         env:
-          DRIVER_BUCKET: ${{ vars.FRONTEND_DRIVER_BUCKET_NAME }}
+          DRIVER_BUCKET: ${{ secrets.FRONTEND_DRIVER_BUCKET_NAME }}
         run: |
           aws s3 sync "frontend/web_driver/out" "s3://${DRIVER_BUCKET}/" --delete
