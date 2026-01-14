@@ -163,8 +163,8 @@ export async function revokeRefreshTokenByHash(db: Pool, tokenHash: Buffer): Pro
 /**
  * List all permissions for a user (via RBAC role assignments).
  */
-export async function listPermissionsForUser(db: Pool, userId: string): Promise<PermissionCode[]> {
-  const res = await db.query<{ code: PermissionCode }>(
+export async function listPermissionsForUser(db: Pool, userId: string): Promise<string[]> {
+  const res = await db.query<{ code: string }>(
     `SELECT DISTINCT p.code
      FROM rbac_permissions p
      JOIN rbac_role_permissions rp ON rp.permission_id = p.id

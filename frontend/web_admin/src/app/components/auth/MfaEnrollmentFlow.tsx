@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Car, Shield, Copy, CheckCircle2 } from "lucide-react";
-import { adminLogout, adminMfaSetup, adminMfaVerify } from "../../api/auth";
-import { authStore } from "../../auth/authStore";
 import type { ApiError } from "../../api/types";
-import { getRecord, getString, isRecord } from "../../../shared/typeGuards";
+import { useAuth } from "../../auth/AuthContext";
 
 type Step = "intro" | "scan" | "success";
 
@@ -19,16 +17,11 @@ function maskForDisplay(secret: string) {
 
 export function MfaEnrollmentFlow(props: MfaEnrollmentFlowProps) {
   const [step, setStep] = useState<Step>("intro");
+  const { logout } = useAuth();
 
   const forceLogoutToLogin = async () => {
-    try {
-      await adminLogout();
-    } catch {
-      // ignore
-    } finally {
-      authStore.clear();
-      props.onDone();
-    }
+    logout();
+    props.onDone();
   };
 
   if (step === "intro") {
@@ -106,6 +99,7 @@ function SecureYourAccount(props: { onStart: () => void }) {
 }
 
 function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => void }) {
+  const { startTotpEnrollment, verifyTotpEnrollment } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [secret, setSecret] = useState<string>("");
   const [qrCodeUri, setQrCodeUri] = useState<string>("");
@@ -122,29 +116,12 @@ function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => voi
       setIsLoading(true);
       setError(null);
       try {
-        const res = await adminMfaSetup();
+        const res = await startTotpEnrollment();
         if (cancelled) return;
 
-        // Backend returns a ready-to-render QR data URL.
-        // Support both shapes for safety.
-        const qr = (() => {
-          if (!isRecord(res)) return undefined;
-          return getString(res.qr_code_uri) ?? getString(res.qrCode);
-        })();
-
-        const secretCode = (() => {
-          if (!isRecord(res)) return undefined;
-          return getString(res.secret) ?? getString(res.secretCode);
-        })();
-
-        if (!qr || !secretCode) {
-          setError("Unexpected response from server. Please try again.");
-          return;
-        }
-
-        setSecret(secretCode);
-        setQrCodeUri(qr);
-        setQrImage(qr);
+        setSecret(res.secretBase32);
+        setQrCodeUri(res.otpauthUrl);
+        setQrImage(res.qrCodeDataUrl);
       } catch (e) {
         const err = e as ApiError;
         if (err?.code === "AUTH_UNAUTHENTICATED" || err?.code === "AUTH_FORBIDDEN" || err?.status === 401 || err?.status === 403) {
@@ -202,7 +179,7 @@ function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => voi
 
     try {
       setIsSubmitting(true);
-      await adminMfaVerify(fullCode);
+      await verifyTotpEnrollment(fullCode);
       props.onSuccess();
     } catch (e) {
       const err = e as ApiError;

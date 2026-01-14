@@ -9,13 +9,13 @@
 
 import { apiRequest } from "./http";
 import { authStore } from "../auth/authStore";
-import type { AdminLoginResult, AuthUser } from "./types";
+import type { AdminLoginResult } from "./types";
 
 /**
  * @deprecated Use AuthContext.loginWithPassword()/authClient instead
  */
 export async function adminLogin(email: string, password: string): Promise<AdminLoginResult> {
-  return apiRequest<AdminLoginResult>("/auth/admin/login", {
+  return apiRequest<AdminLoginResult>("/admin/auth/login", {
     method: "POST",
     body: JSON.stringify({ email, password }),
   });
@@ -25,15 +25,14 @@ export async function adminLogin(email: string, password: string): Promise<Admin
  * @deprecated Use AuthContext.submitTotpCode()/authClient instead
  */
 export async function adminVerifyMfa(
-  email: string,
   session: string,
-  code: string
-): Promise<{ access_token: string; user: AuthUser } & Record<string, unknown>> {
-  return apiRequest<{ access_token: string; user: AuthUser } & Record<string, unknown>>(
-    "/auth/admin/mfa/verify",
+  otp: string
+): Promise<{ accessToken: string; refreshToken: string; expiresAt: string } & Record<string, unknown>> {
+  return apiRequest<{ accessToken: string; refreshToken: string; expiresAt: string } & Record<string, unknown>>(
+    "/admin/auth/login/mfa",
     {
       method: "POST",
-      body: JSON.stringify({ email, session, code }),
+      body: JSON.stringify({ session, otp }),
     }
   );
 }

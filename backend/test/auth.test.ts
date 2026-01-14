@@ -280,18 +280,15 @@ describe('auth (admin TOTP 2FA)', () => {
 });
 
 describe('auth (permission middleware)', () => {
-  it('GET /api/v1/admin/auth/permissions enforces RBAC permission', async () => {
+  it('GET /api/v1/admin/auth/permissions requires ADMIN role (not a specific permission)', async () => {
     const app = buildApp({ logger: false });
     await app.ready();
 
     const userId = '00000000-0000-0000-0000-000000000001';
-    const { token } = await signAccessToken({ userId, role: 'ADMIN' });
+    const { token: driverToken } = await signAccessToken({ userId, role: 'DRIVER' });
+    const { token: adminToken } = await signAccessToken({ userId, role: 'ADMIN' });
 
-    let allow = false;
     const queryMock = vi.fn(async (sql: string) => {
-      if (sql.includes('WHERE ur.user_id = $1 AND p.code = $2')) {
-        return { rows: allow ? [{ ok: 1 }] : [] };
-      }
       if (sql.includes('SELECT DISTINCT p.code')) {
         return { rows: [{ code: 'admin:rbac:read' }] };
       }
@@ -299,20 +296,16 @@ describe('auth (permission middleware)', () => {
     });
     (app.db as unknown as { query: typeof queryMock }).query = queryMock;
 
-    const forbiddenRes = await app.inject({
+    const roleForbiddenRes = await app.inject({
       method: 'GET',
       url: '/api/v1/admin/auth/permissions',
-      headers: { authorization: `Bearer ${token}` }
+      headers: { authorization: `Bearer ${driverToken}` }
     });
-    expect(forbiddenRes.statusCode).toBe(403);
-    const forbiddenBody = forbiddenRes.json() as ErrorResponse;
-    expect(forbiddenBody.error.code).toBe('INSUFFICIENT_PERMISSIONS');
-
-    allow = true;
+    expect(roleForbiddenRes.statusCode).toBe(403);
     const okRes = await app.inject({
       method: 'GET',
       url: '/api/v1/admin/auth/permissions',
-      headers: { authorization: `Bearer ${token}` }
+      headers: { authorization: `Bearer ${adminToken}` }
     });
     expect(okRes.statusCode).toBe(200);
     const okBody = okRes.json() as { permissions: string[] };

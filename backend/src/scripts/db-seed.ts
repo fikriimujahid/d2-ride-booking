@@ -137,11 +137,34 @@ async function upsertRbacPermission(pool: ReturnType<typeof createDbPool>, code:
 
 async function ensureSeedAdminRbac(pool: ReturnType<typeof createDbPool>, adminUserId: string): Promise<void> {
   // Baseline permissions used by middleware examples.
+  // NOTE: permission codes are stable strings (migration-friendly).
   const permissions: Array<{ code: string; description: string }> = [
     { code: 'admin:rbac:read', description: 'Read RBAC configuration' },
     { code: 'admin:rbac:write', description: 'Modify RBAC configuration' },
     { code: 'admin:users:read', description: 'Read users' },
-    { code: 'admin:users:write', description: 'Modify users' }
+    { code: 'admin:users:write', description: 'Modify users' },
+
+    // Web Admin module access (UX gating + future API enforcement)
+    { code: 'admin.dashboard.view', description: 'View dashboard module' },
+    { code: 'admin.passengers.view', description: 'View passengers module' },
+    { code: 'admin.drivers.view', description: 'View drivers module' },
+    { code: 'admin.disputes.view', description: 'View disputes module' },
+    { code: 'admin.pricing.view', description: 'View pricing module' },
+    { code: 'admin.analytics.view', description: 'View analytics module' },
+    { code: 'admin.fraud.view', description: 'View fraud module' },
+    { code: 'admin.admins.view', description: 'View admins module' },
+    { code: 'admin.settings.view', description: 'View settings module' },
+
+    // Web Admin module actions (used to enable/disable controls)
+    { code: 'admin.dashboard.control', description: 'Control dashboard (operational controls)' },
+    { code: 'admin.passengers.edit', description: 'Edit/manage passengers' },
+    { code: 'admin.drivers.edit', description: 'Edit/manage drivers' },
+    { code: 'admin.disputes.resolve', description: 'Resolve disputes' },
+    { code: 'admin.pricing.manage', description: 'Manage pricing' },
+    { code: 'admin.analytics.export', description: 'Export analytics' },
+    { code: 'admin.fraud.investigate', description: 'Investigate fraud' },
+    { code: 'admin.admins.manage', description: 'Manage admins' },
+    { code: 'admin.settings.manage', description: 'Manage settings' }
   ];
 
   const roleId = await upsertRbacRole(pool, 'ADMIN_SUPER', 'Full admin access');
@@ -156,6 +179,16 @@ async function ensureSeedAdminRbac(pool: ReturnType<typeof createDbPool>, adminU
       [roleId, permissionId]
     );
   }
+
+  // Ensure ADMIN_SUPER truly has ALL permissions present in the catalog.
+  // This makes seed behavior robust as new permissions are added over time.
+  await pool.query(
+    `INSERT INTO rbac_role_permissions (role_id, permission_id)
+     SELECT $1, p.id
+     FROM rbac_permissions p
+     ON CONFLICT DO NOTHING`,
+    [roleId]
+  );
 
   await pool.query('INSERT INTO rbac_user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
     adminUserId,

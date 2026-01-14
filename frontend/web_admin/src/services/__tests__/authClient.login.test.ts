@@ -38,19 +38,17 @@ describe("authClient.login (unit)", () => {
     vi.restoreAllMocks();
   });
 
-  it("POSTs /api/v1/admin/auth/login with {email,password} and stores tokens", async () => {
-    const exp = Math.floor(Date.now() / 1000) + 60;
-    const accessToken = makeJwt({ sub: "u1", role: "ADMIN", typ: "access", exp });
-
+  it("POSTs /api/v1/admin/auth/login with {email,password} and returns MFA challenge (no tokens yet)", async () => {
     const fetchMock = mockFetchJson(200, {
-      accessToken,
-      refreshToken: "refresh-1",
-      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      challengeName: "SOFTWARE_TOKEN_MFA",
+      session: "sess-1",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
 
     globalThis.fetch = fetchMock;
 
-    await authClient.login("admin@example.com", "ChangeMe123!");
+    const result = await authClient.login("admin@example.com", "ChangeMe123!");
+    expect(result.kind).toBe("MFA_CHALLENGE");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
@@ -63,12 +61,48 @@ describe("authClient.login (unit)", () => {
     expect(init.headers).toMatchObject({ "Content-Type": "application/json" });
     expect(init.body).toBe(JSON.stringify({ email: "admin@example.com", password: "ChangeMe123!" }));
 
+    expect(authStore.get()).toBeNull();
+  });
+
+  it("stores tokens after responding to MFA challenge", async () => {
+    const exp = Math.floor(Date.now() / 1000) + 60;
+    const accessToken = makeJwt({ sub: "u1", role: "ADMIN", typ: "access", exp });
+
+    const fetchMock = vi
+      .fn()
+      // /admin/auth/login/mfa
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({
+          accessToken,
+          refreshToken: "refresh-1",
+          expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+        }),
+        text: async () => "",
+      })
+      // /admin/auth/permissions (best-effort)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({ permissions: ["admin:rbac:read"] }),
+        text: async () => "",
+      });
+
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await authClient.respondToMfaChallenge({ session: "sess-1", otp: "123456", email: "admin@example.com" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
     const stored = authStore.get();
     expect(stored?.access_token).toBe(accessToken);
     expect(stored?.refresh_token).toBe("refresh-1");
     expect(stored?.user.system_role).toBe("ADMIN");
-    expect(stored?.user.permissions).toContain("*");
     expect(stored?.user.id).toBe("u1");
+    expect(stored?.user.permissions).toContain("admin:rbac:read");
   });
 
   it("surfaces nested backend error message", async () => {

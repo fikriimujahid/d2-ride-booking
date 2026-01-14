@@ -31,7 +31,7 @@ import {
 } from './auth.controller.js';
 import type { UserRole } from './types.js';
 import { env } from '../../config/env.js';
-import { requireAuth, requirePermission, requireTotpSetupAuth } from './middleware.js';
+import { requireAuth, requireRole, requireTotpSetupAuth } from './middleware.js';
 
 function rolePrefix(role: UserRole): string {
   switch (role) {
@@ -163,7 +163,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       app.get<{ Reply: { permissions: string[] } }>(
         `${prefix}/auth/permissions`,
         {
-          preHandler: [requireAuth(), requirePermission('admin:rbac:read')],
+          preHandler: [requireAuth(), requireRole(['ADMIN'])],
           schema: {
             tags: ['auth '+role],
             summary: 'List current admin permissions (RBAC)',

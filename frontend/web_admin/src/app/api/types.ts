@@ -62,40 +62,22 @@ export type AdminContext = {
 
 export type AdminLoginResult =
   | {
-      // Backend-supported state: MFA_SETUP_REQUIRED
-      // SECURITY: the client receives only an opaque `session` (sealed by backend), never Cognito session details.
-      mfa_required: true;
-      status: "MFA_SETUP_REQUIRED";
-      email: string;
+      // Backend: admin needs to enroll TOTP (no access/refresh token yet)
+      twoFactorRequired: true;
+      setupToken: string;
+      expiresAt: string;
+    }
+  | {
+      // Backend: admin has TOTP enrolled and must respond to SOFTWARE_TOKEN_MFA
+      challengeName: "SOFTWARE_TOKEN_MFA";
       session: string;
-      qr_code_uri: string;
-      secret: string;
-
-      // Back-compat fields (do not use for UI decisions)
-      challenge_name?: string;
+      expiresAt: string;
     }
   | {
-      // Backend-supported state: MFA_VERIFICATION_REQUIRED
-      // SECURITY: `session` is an opaque backend token; UI must never display it.
-      mfa_required: true;
-      status: "MFA_VERIFICATION_REQUIRED";
-      email: string;
-
-      // Some backend responses require re-login and may omit session.
-      // Secure default: frontend should fail closed and send user back to password login.
-      session?: string;
-
-      // Back-compat field (do not use for UI decisions)
-      challenge_name?: string;
-    }
-  | {
-      access_token: string;
-      id_token?: string;
-      refresh_token?: string;
-      token_type?: string;
-      // Hint only for UX routing; backend remains the source of truth.
-      mfa_hint?: "MFA_NOT_PRESENT";
-      user: AuthUser;
+      // Defensive: token response shape (some older code paths used this)
+      accessToken: string;
+      refreshToken: string;
+      expiresAt: string;
     };
 
 export class ApiError extends Error {

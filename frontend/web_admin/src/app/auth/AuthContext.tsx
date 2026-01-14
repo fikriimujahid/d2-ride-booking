@@ -12,6 +12,8 @@ import { authClient } from "../../services/authClient";
 
 export type AuthStatus =
   | "UNAUTHENTICATED"
+  | "MFA_CHALLENGE"
+  | "MFA_SETUP_REQUIRED"
   | "AUTHENTICATED";
 
 type AuthContextValue = {
@@ -19,7 +21,13 @@ type AuthContextValue = {
   isBootstrapping: boolean;
   user: AuthUser | null;
 
+  mfaChallenge: { session: string; expiresAt: string; email: string } | null;
+  totpSetup: { setupToken: string; expiresAt: string; email: string } | null;
+
   loginWithPassword: (email: string, password: string) => Promise<AuthStatus>;
+  submitMfaOtp: (otp: string) => Promise<void>;
+  startTotpEnrollment: () => Promise<{ secretBase32: string; otpauthUrl: string; qrCodeDataUrl: string }>;
+  verifyTotpEnrollment: (otp: string) => Promise<void>;
   logout: () => void;
   hasPermission: (permission: string) => boolean;
 };
@@ -31,6 +39,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
 
   const [user, setUser] = useState<AuthUser | null>(authStore.getUser());
+  const [mfaChallenge, setMfaChallenge] = useState<AuthContextValue["mfaChallenge"]>(null);
+  const [totpSetup, setTotpSetup] = useState<AuthContextValue["totpSetup"]>(null);
 
   const hasPermission = useCallback((permission: string) => {
     return authStore.hasPermission(permission);
@@ -40,6 +50,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     // Best-effort server-side logout; always clear local state.
     void authClient.logout();
     setUser(null);
+    setMfaChallenge(null);
+    setTotpSetup(null);
     setStatus("UNAUTHENTICATED");
   }, []);
 
@@ -55,11 +67,15 @@ export function AuthProvider(props: { children: React.ReactNode }) {
             if (cancelled) return;
             setStatus("AUTHENTICATED");
             setUser(authStore.getUser());
+            setMfaChallenge(null);
+            setTotpSetup(null);
           } catch {
             authClient.clear();
             if (cancelled) return;
             setStatus("UNAUTHENTICATED");
             setUser(null);
+            setMfaChallenge(null);
+            setTotpSetup(null);
           }
         }
       } finally {
@@ -73,25 +89,83 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const loginWithPassword = useCallback(async (email: string, password: string): Promise<AuthStatus> => {
-    await authClient.login(email, password);
-    setUser(authStore.getUser());
-    setStatus("AUTHENTICATED");
-    return "AUTHENTICATED";
+    const result = await authClient.login(email, password);
+
+    if (result.kind === "AUTHENTICATED") {
+      setUser(authStore.getUser());
+      setMfaChallenge(null);
+      setTotpSetup(null);
+      setStatus("AUTHENTICATED");
+      return "AUTHENTICATED";
+    }
+
+    if (result.kind === "MFA_CHALLENGE") {
+      setUser(null);
+      setTotpSetup(null);
+      setMfaChallenge({ session: result.session, expiresAt: result.expiresAt, email });
+      setStatus("MFA_CHALLENGE");
+      return "MFA_CHALLENGE";
+    }
+
+    setUser(null);
+    setMfaChallenge(null);
+    setTotpSetup({ setupToken: result.setupToken, expiresAt: result.expiresAt, email });
+    setStatus("MFA_SETUP_REQUIRED");
+    return "MFA_SETUP_REQUIRED";
   }, []);
+
+  const submitMfaOtp = useCallback(async (otp: string) => {
+    if (!mfaChallenge) {
+      throw new Error("No MFA challenge in progress");
+    }
+    await authClient.respondToMfaChallenge({ session: mfaChallenge.session, otp, email: mfaChallenge.email });
+    setUser(authStore.getUser());
+    setMfaChallenge(null);
+    setTotpSetup(null);
+    setStatus("AUTHENTICATED");
+  }, [mfaChallenge]);
+
+  const startTotpEnrollment = useCallback(async () => {
+    if (!totpSetup) {
+      throw new Error("No TOTP setup in progress");
+    }
+    return await authClient.startTotpSetup(totpSetup.setupToken);
+  }, [totpSetup]);
+
+  const verifyTotpEnrollment = useCallback(async (otp: string) => {
+    if (!totpSetup) {
+      throw new Error("No TOTP setup in progress");
+    }
+    await authClient.verifyTotpSetup({ setupToken: totpSetup.setupToken, otp, email: totpSetup.email });
+    setUser(authStore.getUser());
+    setMfaChallenge(null);
+    setTotpSetup(null);
+    setStatus("AUTHENTICATED");
+  }, [totpSetup]);
 
   const value = useMemo(() => ({
     status,
     isBootstrapping,
     user,
+    mfaChallenge,
+    totpSetup,
     hasPermission,
     loginWithPassword,
+    submitMfaOtp,
+    startTotpEnrollment,
+    verifyTotpEnrollment,
     logout
   }), [
     status,
     isBootstrapping,
     user,
+    mfaChallenge,
+    totpSetup,
     hasPermission,
     loginWithPassword,
+    submitMfaOtp,
+    startTotpEnrollment,
+    verifyTotpEnrollment,
     logout,
   ]);
 

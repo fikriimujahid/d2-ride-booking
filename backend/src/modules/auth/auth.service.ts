@@ -325,7 +325,7 @@ export async function enableTotpForAdmin(
 /**
  * List all permissions for a user (via RBAC).
  */
-export async function listUserPermissions(db: Pool, userId: string): Promise<PermissionCode[]> {
+export async function listUserPermissions(db: Pool, userId: string): Promise<string[]> {
   return await listPermissionsForUser(db, userId);
 }
 

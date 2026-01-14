@@ -6,71 +6,58 @@ vi.mock("../http", () => ({
 }));
 
 describe("admin auth API (unit)", () => {
-  it("adminLogin calls /auth/admin/login with email/password", async () => {
+  it("adminLogin calls /admin/auth/login with email/password", async () => {
     const { apiRequest } = await import("../http");
     const { adminLogin } = await import("../auth");
 
     (apiRequest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      access_token: "access",
-      refresh_token: "refresh",
-      user: {
-        id: "u1",
-        email: "admin@example.com",
-        system_role: "ADMIN",
-        roles: [],
-        permissions: [],
-      },
+      challengeName: "SOFTWARE_TOKEN_MFA",
+      session: "sess",
+      expiresAt: new Date().toISOString(),
     });
 
     const result = await adminLogin("admin@example.com", "pw");
 
     expect(apiRequest).toHaveBeenCalledTimes(1);
-    expect(apiRequest).toHaveBeenCalledWith("/auth/admin/login", {
+    expect(apiRequest).toHaveBeenCalledWith("/admin/auth/login", {
       method: "POST",
       body: JSON.stringify({ email: "admin@example.com", password: "pw" }),
     });
-    expect(result).toMatchObject({ access_token: "access" });
+    expect(result).toMatchObject({ challengeName: "SOFTWARE_TOKEN_MFA", session: "sess" });
   });
 
-  it("adminLogin passes through MFA-required response", async () => {
+  it("adminLogin passes through 2FA-setup-required response", async () => {
     const { apiRequest } = await import("../http");
     const { adminLogin } = await import("../auth");
 
     (apiRequest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      mfa_required: true,
-      status: "MFA_VERIFICATION_REQUIRED",
-      email: "admin@example.com",
-      session: "sess",
-      challenge_name: "SOFTWARE_TOKEN_MFA",
+      twoFactorRequired: true,
+      setupToken: "setup-token",
+      expiresAt: new Date().toISOString(),
     });
 
     const result = await adminLogin("admin@example.com", "pw");
-    expect(result).toMatchObject({ mfa_required: true, session: "sess" });
+    expect(result).toMatchObject({ twoFactorRequired: true, setupToken: "setup-token" });
   });
 
-  it("adminVerifyMfa calls /auth/admin/mfa/verify with session + code", async () => {
+  it("adminVerifyMfa calls /admin/auth/login/mfa with session + otp", async () => {
     const { apiRequest } = await import("../http");
     const { adminVerifyMfa } = await import("../auth");
 
     (apiRequest as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      access_token: "access",
-      user: {
-        id: "u1",
-        email: "admin@example.com",
-        system_role: "ADMIN",
-        roles: [],
-        permissions: [],
-      },
+      accessToken: "access",
+      refreshToken: "refresh",
+      expiresAt: new Date().toISOString(),
     });
 
-    const result = await adminVerifyMfa("admin@example.com", "sess", "123456");
+    const result = await adminVerifyMfa("sess", "123456");
 
     expect(apiRequest).toHaveBeenCalledTimes(1);
-    expect(apiRequest).toHaveBeenCalledWith("/auth/admin/mfa/verify", {
+    expect(apiRequest).toHaveBeenCalledWith("/admin/auth/login/mfa", {
       method: "POST",
-      body: JSON.stringify({ email: "admin@example.com", session: "sess", code: "123456" }),
+      body: JSON.stringify({ session: "sess", otp: "123456" }),
     });
-    expect(result).toMatchObject({ access_token: "access" });
+    expect(result).toMatchObject({ accessToken: "access" });
   });
 
   it("propagates errors from the HTTP layer", async () => {

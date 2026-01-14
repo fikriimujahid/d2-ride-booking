@@ -9,6 +9,8 @@ import {
 } from "react-router-dom";
 
 import { LoginScreen } from "./components/auth/LoginScreen";
+import { MfaEnrollmentFlow } from "./components/auth/MfaEnrollmentFlow";
+import { MfaChallengeScreen } from "./components/auth/MfaChallengeScreen";
 import { ForbiddenPage } from "./components/auth/ForbiddenPage";
 import { AdminShell } from "./components/layout/AdminShell";
 
@@ -61,7 +63,38 @@ function LoginRoute() {
 
   if (isBootstrapping) return <FullPageLoading />;
   if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
+  if (status === "MFA_CHALLENGE") return <Navigate to="/mfa/challenge" replace />;
   return <LoginScreen />;
+}
+
+function MfaSetupRoute() {
+  const navigate = useNavigate();
+  const { status, isBootstrapping } = useAuth();
+  if (isBootstrapping) return <FullPageLoading />;
+
+  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  if (status !== "MFA_SETUP_REQUIRED") return <Navigate to="/login" replace />;
+
+  return <MfaEnrollmentFlow onDone={() => navigate("/login", { replace: true })} />;
+}
+
+function MfaChallengeRoute() {
+  const navigate = useNavigate();
+  const { status, isBootstrapping, logout } = useAuth();
+  if (isBootstrapping) return <FullPageLoading />;
+
+  if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
+  if (status !== "MFA_CHALLENGE") return <Navigate to="/login" replace />;
+
+  return (
+    <MfaChallengeScreen
+      onCancel={() => {
+        logout();
+        navigate("/login", { replace: true });
+      }}
+    />
+  );
 }
 
 function AdminShellRoute() {
@@ -117,6 +150,8 @@ function AppRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/login" replace />} />
         <Route path="/login" element={<LoginRoute />} />
+        <Route path="/mfa/setup" element={<MfaSetupRoute />} />
+        <Route path="/mfa/challenge" element={<MfaChallengeRoute />} />
         <Route path="/forbidden" element={<ForbiddenRoute />} />
         <Route
           path="/app"
