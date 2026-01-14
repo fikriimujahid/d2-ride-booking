@@ -22,6 +22,7 @@ pack_backend() {
   local out="$OUT_DIR/backend-$RELEASE_ID.tgz"
   tar -C "$src" -czf "$out" \
     dist \
+    sql \
     package.json \
     package-lock.json \
     README.md 2>/dev/null || true
