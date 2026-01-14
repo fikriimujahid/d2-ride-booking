@@ -1,7 +1,7 @@
 {
   "name": "d2-backend",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.2",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
@@ -10,6 +10,8 @@
     "start": "node dist/server.js",
     "db:migrate": "tsx src/scripts/db-migrate.ts",
     "db:seed": "tsx src/scripts/db-seed.ts",
+    "db:migrate:prod": "node dist/scripts/db-migrate.js",
+    "db:seed:prod": "node dist/scripts/db-seed.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

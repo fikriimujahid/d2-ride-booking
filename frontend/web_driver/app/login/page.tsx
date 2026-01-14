@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { Suspense } from "react"
 
 import { Header } from "@/components/header"
 import { useState } from "react"
@@ -8,7 +9,7 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { driverLogin } from "@/lib/auth/client"
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [email, setEmail] = useState("")
@@ -92,5 +93,13 @@ export default function LoginPage() {
         </div>
       </div>
     </main>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="px-4 py-8">Loading...</div>}>
+      <LoginPageContent />
+    </Suspense>
   )
 }

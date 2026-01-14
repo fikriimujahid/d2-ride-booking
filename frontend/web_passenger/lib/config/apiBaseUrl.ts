@@ -22,11 +22,11 @@ export function getPublicApiBaseUrl() {
  * Base URL used by server-only code (Route Handlers / Server Actions).
  */
 export function getServerApiBaseUrl() {
-  const raw = process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
+  const raw = process.env.AUTH_API_BASE_URL ?? process.env.API_BASE_URL ?? process.env.NEXT_PUBLIC_API_BASE_URL
 
   if (!raw) {
     throw new Error(
-      "Missing API_BASE_URL (or NEXT_PUBLIC_API_BASE_URL). Example: http://localhost:3001/api/v1"
+      "Missing AUTH_API_BASE_URL (or API_BASE_URL, NEXT_PUBLIC_API_BASE_URL). Example: http://127.0.0.1:3000/api/v1"
     )
   }
 

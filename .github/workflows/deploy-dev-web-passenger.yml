@@ -1,0 +1,162 @@
+name: Web Passenger Deploy (dev)
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - frontend/web_passenger/**
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dev-ec2
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.meta.outputs.release_id }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "release_id=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build web_passenger
+        working-directory: frontend/web_passenger
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package web_passenger artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x infra/deploy/package-artifacts.sh
+          infra/deploy/package-artifacts.sh artifacts "${{ steps.meta.outputs.release_id }}" web_passenger
+
+      - name: Upload web_passenger artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: web_passenger-${{ steps.meta.outputs.release_id }}
+          path: artifacts/web_passenger-${{ steps.meta.outputs.release_id }}.tgz
+          if-no-files-found: error
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Download web_passenger artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: web_passenger-${{ needs.build.outputs.release_id }}
+          path: artifacts
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload web_passenger artifact to S3
+        id: s3
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUCKET="${{ secrets.DEPLOY_S3_BUCKET }}"
+          RID="${{ needs.build.outputs.release_id }}"
+
+          web_passenger_key="artifacts/dev/${RID}/web_passenger.tgz"
+
+          aws s3 cp "artifacts/web_passenger-${RID}.tgz" "s3://${BUCKET}/${web_passenger_key}" --only-show-errors
+
+          echo "bucket=${BUCKET}" >> "$GITHUB_OUTPUT"
+          echo "web_passenger_key=${web_passenger_key}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve target instance id
+        id: instance
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${{ secrets.EC2_INSTANCE_ID }}" ]]; then
+            echo "instance_id=${{ secrets.EC2_INSTANCE_ID }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          PROJECT_TAG="${{ secrets.EC2_TAG_PROJECT }}"
+          ENV_TAG="${{ secrets.EC2_TAG_ENVIRONMENT }}"
+
+          if [[ -z "${PROJECT_TAG}" || -z "${ENV_TAG}" ]]; then
+            echo "Set either EC2_INSTANCE_ID or both EC2_TAG_PROJECT + EC2_TAG_ENVIRONMENT in GitHub Environment 'dev'." >&2
+            exit 1
+          fi
+
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters \
+              "Name=tag:project,Values=${PROJECT_TAG}" \
+              "Name=tag:environment,Values=${ENV_TAG}" \
+              "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == "None" ]]; then
+            echo "No running instance found for project/environment tags" >&2
+            exit 1
+          fi
+
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy web_passenger via SSM Run Command
+        id: ssm
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          INSTANCE_ID="${{ steps.instance.outputs.instance_id }}"
+          BUCKET="${{ steps.s3.outputs.bucket }}"
+          RID="${{ needs.build.outputs.release_id }}"
+
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --comment "d2 deploy dev web_passenger ${RID}" \
+            --parameters "{\"commands\":[\"sudo /usr/local/bin/ssm-deploy ${BUCKET} ${RID} - - ${{ steps.s3.outputs.web_passenger_key }}\"]}" \
+            --timeout-seconds 1800 \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "command_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ssm wait command-executed \
+            --command-id "${{ steps.ssm.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}"
+
+      - name: Show SSM output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.ssm.outputs.command_id }}" \
+            --instance-id "${{ steps.instance.outputs.instance_id }}" \
+            --query '{Status:Status,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+            --output json
