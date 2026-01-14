@@ -31,7 +31,7 @@ export const swaggerPlugin = fp<SwaggerPluginOptions>(async (app, opts) => {
       docExpansion: 'list',
       deepLinking: true
     },
-    staticCSP: true
+    staticCSP: false
   });
 
   // Expose raw spec for tooling
