@@ -2,6 +2,11 @@
 -- Tables:
 --  - users
 --  - refresh_tokens
+--  - rbac_roles
+--  - rbac_permissions
+--  - rbac_role_permissions
+--  - rbac_user_roles
+--  - user_totp
 
 -- UUID generation
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
@@ -63,3 +68,45 @@ CREATE UNIQUE INDEX IF NOT EXISTS refresh_tokens_token_hash_uq ON refresh_tokens
 CREATE INDEX IF NOT EXISTS refresh_tokens_user_id_idx ON refresh_tokens (user_id);
 CREATE INDEX IF NOT EXISTS refresh_tokens_expires_at_idx ON refresh_tokens (expires_at);
 CREATE INDEX IF NOT EXISTS refresh_tokens_revoked_at_idx ON refresh_tokens (revoked_at);
+
+-- RBAC
+CREATE TABLE IF NOT EXISTS rbac_roles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL UNIQUE,
+  description text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS rbac_permissions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  code text NOT NULL UNIQUE,
+  description text,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS rbac_role_permissions (
+  role_id uuid NOT NULL REFERENCES rbac_roles(id) ON DELETE CASCADE,
+  permission_id uuid NOT NULL REFERENCES rbac_permissions(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (role_id, permission_id)
+);
+
+CREATE TABLE IF NOT EXISTS rbac_user_roles (
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id uuid NOT NULL REFERENCES rbac_roles(id) ON DELETE CASCADE,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS rbac_user_roles_user_id_idx ON rbac_user_roles (user_id);
+CREATE INDEX IF NOT EXISTS rbac_role_permissions_role_id_idx ON rbac_role_permissions (role_id);
+
+-- Admin TOTP 2FA
+CREATE TABLE IF NOT EXISTS user_totp (
+  user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret_enc bytea NOT NULL,
+  enabled boolean NOT NULL DEFAULT false,
+  verified_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);

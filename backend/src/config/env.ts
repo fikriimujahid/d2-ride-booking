@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import crypto from 'node:crypto';
 
 dotenv.config();
 
@@ -28,12 +29,18 @@ type Env = {
   jwtAccessTtlSeconds: number;
   jwtRefreshTtlSeconds: number;
 
+  totpSetupTokenTtlSeconds: number;
+  mfaChallengeTokenTtlSeconds: number;
+
   seedAdminEmail: string;
   seedAdminPassword: string;
   seedDriverEmail: string;
   seedDriverPassword: string;
   seedPassengerEmail: string;
   seedPassengerPassword: string;
+
+  totpIssuer: string;
+  totpEncryptionKeyBase64: string;
 };
 
 function parseNodeEnv(value: string | undefined): NodeEnv {
@@ -63,6 +70,24 @@ function getJwtSecret(name: string, nodeEnv: NodeEnv): string {
   if (configured) return configured;
   if (nodeEnv === 'test') return `test-${name.toLowerCase()}`;
   return requireEnv(name);
+}
+
+function requireBase64Aes256Key(name: string, value: string): string {
+  const buf = Buffer.from(value, 'base64');
+  if (buf.length !== 32) {
+    throw new Error(`Invalid ${name}: must be base64 for 32 bytes (AES-256 key)`);
+  }
+  return value;
+}
+
+function getTotpEncryptionKeyBase64(nodeEnv: NodeEnv): string {
+  const configured = process.env.TOTP_ENCRYPTION_KEY_BASE64;
+  if (configured) return requireBase64Aes256Key('TOTP_ENCRYPTION_KEY_BASE64', configured);
+  if (nodeEnv === 'test') {
+    // Deterministic key for test environment only.
+    return crypto.createHash('sha256').update('TOTP_ENCRYPTION_KEY_BASE64:test').digest('base64');
+  }
+  return requireBase64Aes256Key('TOTP_ENCRYPTION_KEY_BASE64', requireEnv('TOTP_ENCRYPTION_KEY_BASE64'));
 }
 
 function parsePositiveInt(name: string, value: string): number {
@@ -129,6 +154,9 @@ export const env: Readonly<Env> = {
   jwtAccessTtlSeconds: parsePositiveInt('JWT_ACCESS_TTL_SECONDS', process.env.JWT_ACCESS_TTL_SECONDS ?? '900'),
   jwtRefreshTtlSeconds: parsePositiveInt('JWT_REFRESH_TTL_SECONDS', process.env.JWT_REFRESH_TTL_SECONDS ?? '2592000'),
 
+  totpSetupTokenTtlSeconds: parsePositiveInt('TOTP_SETUP_TOKEN_TTL_SECONDS', process.env.TOTP_SETUP_TOKEN_TTL_SECONDS ?? '600'),
+  mfaChallengeTokenTtlSeconds: parsePositiveInt('MFA_CHALLENGE_TOKEN_TTL_SECONDS', process.env.MFA_CHALLENGE_TOKEN_TTL_SECONDS ?? '300'),
+
   // Seed defaults (used for Swagger examples and db:seed)
   seedAdminEmail: optionalString('SEED_ADMIN_EMAIL') ?? 'admin@example.com',
   seedAdminPassword: optionalString('SEED_ADMIN_PASSWORD') ?? 'ChangeMe123!',
@@ -137,7 +165,10 @@ export const env: Readonly<Env> = {
   seedDriverPassword: optionalString('SEED_DRIVER_PASSWORD') ?? 'ChangeMe123!',
 
   seedPassengerEmail: optionalString('SEED_PASSENGER_EMAIL') ?? 'passenger@example.com',
-  seedPassengerPassword: optionalString('SEED_PASSENGER_PASSWORD') ?? 'ChangeMe123!'
+  seedPassengerPassword: optionalString('SEED_PASSENGER_PASSWORD') ?? 'ChangeMe123!',
+
+  totpIssuer: optionalString('TOTP_ISSUER') ?? 'D2 Ride Booking',
+  totpEncryptionKeyBase64: getTotpEncryptionKeyBase64(nodeEnv)
 };
 
 if (env.nodeEnv !== 'test') {

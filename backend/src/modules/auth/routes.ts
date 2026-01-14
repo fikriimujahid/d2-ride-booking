@@ -1,9 +1,37 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { roleLoginBodySchema, refreshBodySchema, logoutBodySchema, tokenResponseSchema } from './schemas.js';
-import type { RoleLoginBody, RefreshBody, LogoutBody, TokenResponse } from './schemas.js';
-import { loginWithRole, refreshWithRole, logout } from './service.js';
+import {
+  admin2faSetupResponseSchema,
+  admin2faVerifyBodySchema,
+  adminLoginResponseSchema,
+  adminMfaRespondBodySchema,
+  roleLoginBodySchema,
+  refreshBodySchema,
+  logoutBodySchema,
+  tokenResponseSchema
+} from './schemas.js';
+import type {
+  Admin2faSetupResponse,
+  Admin2faVerifyBody,
+  AdminLoginResponse,
+  AdminMfaRespondBody,
+  RoleLoginBody,
+  RefreshBody,
+  LogoutBody,
+  TokenResponse
+} from './schemas.js';
+import {
+  handleAdmin2faSetup,
+  handleAdmin2faVerify,
+  handleAdminLogin,
+  handleAdminMfaResponse,
+  handleListPermissions,
+  handleLogout,
+  handleRefreshSession,
+  handleRoleLogin
+} from './auth.controller.js';
 import type { UserRole } from './types.js';
 import { env } from '../../config/env.js';
+import { requireAuth, requirePermission, requireTotpSetupAuth } from './middleware.js';
 
 function rolePrefix(role: UserRole): string {
   switch (role) {
@@ -42,33 +70,129 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       }
     };
 
-    app.post<{ Body: RoleLoginBody; Reply: TokenResponse }>(
-      `${prefix}/auth/login`,
-      {
-        schema: {
-          tags: ['auth'],
-          summary: `${role} login and receive access + refresh tokens`,
-          body: roleLoginBodySchemaWithExample,
-          response: {
-            200: tokenResponseSchema
+    if (role === 'ADMIN') {
+      app.post<{ Body: RoleLoginBody; Reply: AdminLoginResponse }>(
+        `${prefix}/auth/login`,
+        {
+          schema: {
+            tags: ['auth '+role],
+            summary:
+              'ADMIN login: returns a 2FA setup token (if not enrolled) or an MFA challenge session (if enrolled)',
+            body: roleLoginBodySchemaWithExample,
+            response: {
+              200: adminLoginResponseSchema
+            }
           }
+        },
+        async (request) => {
+          return await handleAdminLogin(app.db, request);
         }
-      },
-      async (request) => {
-        const ip = request.ip;
-        const userAgent = request.headers['user-agent'];
-        return await loginWithRole(app.db, role, request.body, {
-          ip,
-          userAgent: typeof userAgent === 'string' ? userAgent : undefined
-        });
-      }
-    );
+      );
+
+      app.post<{ Body: AdminMfaRespondBody; Reply: TokenResponse }>(
+        `${prefix}/auth/login/mfa`,
+        {
+          schema: {
+            tags: ['auth '+role],
+            summary: 'ADMIN respond to SOFTWARE_TOKEN_MFA challenge and receive access + refresh tokens',
+            body: adminMfaRespondBodySchema,
+            response: {
+              200: tokenResponseSchema
+            }
+          }
+        },
+        async (request) => {
+          return await handleAdminMfaResponse(app.db, request);
+        }
+      );
+    } else {
+      app.post<{ Body: RoleLoginBody; Reply: TokenResponse }>(
+        `${prefix}/auth/login`,
+        {
+          schema: {
+            tags: ['auth '+role],
+            summary: `${role} login and receive access + refresh tokens`,
+            body: roleLoginBodySchemaWithExample,
+            response: {
+              200: tokenResponseSchema
+            }
+          }
+        },
+        async (request) => {
+          return await handleRoleLogin(app.db, role, request);
+        }
+      );
+    }
+
+    if (role === 'ADMIN') {
+      app.post<{ Reply: Admin2faSetupResponse }>(
+        `${prefix}/auth/2fa/setup`,
+        {
+          preHandler: [requireTotpSetupAuth()],
+          schema: {
+            tags: ['auth '+role],
+            summary: 'Admin 2FA (TOTP) setup: returns secret + provisioning QR',
+            response: {
+              200: admin2faSetupResponseSchema
+            }
+          }
+        },
+        async (request) => {
+          return await handleAdmin2faSetup(app.db, request);
+        }
+      );
+
+      app.post<{ Body: Admin2faVerifyBody; Reply: TokenResponse }>(
+        `${prefix}/auth/2fa/verify`,
+        {
+          preHandler: [requireTotpSetupAuth()],
+          schema: {
+            tags: ['auth '+role],
+            summary: 'Admin 2FA (TOTP) verify: enables 2FA and returns access + refresh tokens',
+            body: admin2faVerifyBodySchema,
+            response: {
+              200: tokenResponseSchema
+            }
+          }
+        },
+        async (request) => {
+          return await handleAdmin2faVerify(app.db, request);
+        }
+      );
+
+      app.get<{ Reply: { permissions: string[] } }>(
+        `${prefix}/auth/permissions`,
+        {
+          preHandler: [requireAuth(), requirePermission('admin:rbac:read')],
+          schema: {
+            tags: ['auth '+role],
+            summary: 'List current admin permissions (RBAC)',
+            response: {
+              200: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  permissions: {
+                    type: 'array',
+                    items: { type: 'string' }
+                  }
+                },
+                required: ['permissions']
+              }
+            }
+          }
+        },
+        async (request) => {
+          return await handleListPermissions(app.db, request);
+        }
+      );
+    }
 
     app.post<{ Body: RefreshBody; Reply: TokenResponse }>(
       `${prefix}/auth/refresh`,
       {
         schema: {
-          tags: ['auth'],
+          tags: ['auth '+role],
           summary: `${role} refresh session`,
           body: refreshBodySchema,
           response: {
@@ -77,12 +201,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         }
       },
       async (request) => {
-        const ip = request.ip;
-        const userAgent = request.headers['user-agent'];
-        return await refreshWithRole(app.db, role, request.body, {
-          ip,
-          userAgent: typeof userAgent === 'string' ? userAgent : undefined
-        });
+        return await handleRefreshSession(app.db, role, request);
       }
     );
 
@@ -90,7 +209,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       `${prefix}/auth/logout`,
       {
         schema: {
-          tags: ['auth'],
+          tags: ['auth '+role],
           summary: `${role} logout (revoke refresh token best-effort)`,
           body: logoutBodySchema,
           response: {
@@ -103,8 +222,7 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         }
       },
       async (request) => {
-        await logout(app.db, request.body);
-        return { ok: true };
+        return await handleLogout(app.db, request);
       }
     );
   }

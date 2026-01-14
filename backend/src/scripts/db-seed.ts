@@ -12,6 +12,8 @@ type SeedUser = {
 
 type UserIdRow = { id: string };
 
+type IdRow = { id: string };
+
 function getEnv(name: string): string | undefined {
   const v = process.env[name];
   if (typeof v !== 'string') return undefined;
@@ -99,14 +101,87 @@ async function upsertUser(pool: ReturnType<typeof createDbPool>, user: SeedUser)
   return id;
 }
 
+async function upsertRbacRole(pool: ReturnType<typeof createDbPool>, name: string, description: string): Promise<string> {
+  const res = await pool.query<IdRow>(
+    `INSERT INTO rbac_roles (name, description)
+     VALUES ($1, $2)
+     ON CONFLICT (name)
+     DO UPDATE SET description = EXCLUDED.description
+     RETURNING id`,
+    [name, description]
+  );
+
+  const id = res.rows[0]?.id;
+  if (!id) {
+    throw new AppError('Failed to upsert RBAC role', { statusCode: 500, code: 'SEED_FAILED' });
+  }
+  return id;
+}
+
+async function upsertRbacPermission(pool: ReturnType<typeof createDbPool>, code: string, description: string): Promise<string> {
+  const res = await pool.query<IdRow>(
+    `INSERT INTO rbac_permissions (code, description)
+     VALUES ($1, $2)
+     ON CONFLICT (code)
+     DO UPDATE SET description = EXCLUDED.description
+     RETURNING id`,
+    [code, description]
+  );
+
+  const id = res.rows[0]?.id;
+  if (!id) {
+    throw new AppError('Failed to upsert RBAC permission', { statusCode: 500, code: 'SEED_FAILED' });
+  }
+  return id;
+}
+
+async function ensureSeedAdminRbac(pool: ReturnType<typeof createDbPool>, adminUserId: string): Promise<void> {
+  // Baseline permissions used by middleware examples.
+  const permissions: Array<{ code: string; description: string }> = [
+    { code: 'admin:rbac:read', description: 'Read RBAC configuration' },
+    { code: 'admin:rbac:write', description: 'Modify RBAC configuration' },
+    { code: 'admin:users:read', description: 'Read users' },
+    { code: 'admin:users:write', description: 'Modify users' }
+  ];
+
+  const roleId = await upsertRbacRole(pool, 'ADMIN_SUPER', 'Full admin access');
+  const permissionIds: string[] = [];
+  for (const p of permissions) {
+    permissionIds.push(await upsertRbacPermission(pool, p.code, p.description));
+  }
+
+  for (const permissionId of permissionIds) {
+    await pool.query(
+      'INSERT INTO rbac_role_permissions (role_id, permission_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+      [roleId, permissionId]
+    );
+  }
+
+  await pool.query('INSERT INTO rbac_user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
+    adminUserId,
+    roleId
+  ]);
+}
+
 async function main(): Promise<void> {
   const pool = createDbPool();
   try {
     const users = seedUsers();
 
+    let adminUserId: string | null = null;
+
     for (const u of users) {
       const id = await upsertUser(pool, u);
       console.log(`db:seed: ensured user role=${u.role} id=${id}`);
+
+      if (u.role === 'ADMIN') {
+        adminUserId = id;
+      }
+    }
+
+    if (adminUserId) {
+      await ensureSeedAdminRbac(pool, adminUserId);
+      console.log('db:seed: ensured RBAC for seed admin');
     }
 
     console.log('db:seed: done');
