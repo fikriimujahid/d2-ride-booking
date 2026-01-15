@@ -18,6 +18,7 @@ declare module 'fastify' {
 export async function authenticateRequest(request: FastifyRequest): Promise<AuthenticatedUser> {
   const header = request.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
+    // Why: we only accept bearer tokens; prevents accidental support for insecure schemes.
     throw createUnauthorizedError('Missing Authorization header');
   }
 
@@ -26,7 +27,12 @@ export async function authenticateRequest(request: FastifyRequest): Promise<Auth
     throw createUnauthorizedError('Missing bearer token');
   }
 
+  // This verifies signature + expiry + claim types.
+  // If removed: any string could be treated as an authenticated identity.
   const claims = await verifyAccessToken(token);
+
+  // Request-scoped user context used by downstream route handlers and RBAC checks.
+  // If removed: each handler would need to re-parse JWT (duplicated logic, inconsistent behavior).
   return { userId: claims.sub, role: claims.role };
 }
 
@@ -47,6 +53,8 @@ export async function authenticateTotpSetupRequest(request: FastifyRequest): Pro
 
 export function requireAuth() {
   return async (request: FastifyRequest, _reply: FastifyReply) => {
+    // Middleware-based authorization: run before handlers.
+    // If removed: endpoints would execute without an authenticated identity.
     request.authUser = await authenticateRequest(request);
   };
 }
@@ -56,6 +64,8 @@ export function requireRole(roles: readonly UserRole[]) {
     const user = request.authUser ?? (await authenticateRequest(request));
     request.authUser = user;
     if (!roles.includes(user.role)) {
+      // Why: role is a coarse-grained boundary (ADMIN vs DRIVER vs PASSENGER).
+      // If removed: non-admin callers could access admin endpoints.
       throw createForbiddenError();
     }
   };
@@ -74,11 +84,14 @@ export function requirePermission(permission: PermissionCode) {
 
     // Admin RBAC only. Driver/Passenger auth remains role-scoped.
     if (user.role !== 'ADMIN') {
+      // Why: permissions are defined only for admins.
+      // If removed: we'd mix two authorization models and risk granting unintended access.
       throw createForbiddenError();
     }
 
     const ok = await userHasPermission(request.server.db, user.userId, permission);
     if (!ok) {
+      // Why: permission denials are security events (auditability + detection).
       await tryInsertSecurityEvent(request.server.db, {
         requestId: (request as FastifyRequest & { auditRequestId?: string }).auditRequestId ?? String(request.id),
         eventType: 'auth.permission_denied',

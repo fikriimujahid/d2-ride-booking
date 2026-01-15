@@ -44,6 +44,9 @@ export async function findActiveUserByEmailAndRole(
   email: string,
   role: UserRole
 ): Promise<UserRow | null> {
+  // CRITICAL: `WHERE role = $1` enforces frontend-type restriction server-side.
+  // Example: an ADMIN account cannot authenticate via /driver/auth/login because the query won't match.
+  // If removed: cross-frontend logins become possible and role boundaries become ambiguous.
   const res = await db.query<UserRow>(
     'SELECT id, role, email, phone, password_hash, is_active FROM users WHERE role = $1 AND lower(email) = lower($2) LIMIT 1',
     [role, email]
@@ -118,6 +121,8 @@ export async function storeRefreshToken(
   expiresAtSeconds: number,
   meta?: { ip?: string; userAgent?: string }
 ): Promise<void> {
+  // Why store a hash: refresh tokens are bearer secrets.
+  // If removed (store raw): DB compromise would immediately grant session takeover.
   await db.query(
     `INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, ip, user_agent)
      VALUES ($1, $2, $3, to_timestamp($4), $5::inet, $6)`,
@@ -144,6 +149,7 @@ export async function revokeAndReplaceRefreshToken(
   oldTokenId: string,
   newRefreshId: string
 ): Promise<void> {
+  // Why replaced_by exists: allows auditing token rotation chains and investigating reuse.
   await db.query(
     'UPDATE refresh_tokens SET revoked_at = now(), replaced_by = $1 WHERE id = $2 AND revoked_at IS NULL',
     [newRefreshId, oldTokenId]
@@ -164,6 +170,9 @@ export async function revokeRefreshTokenByHash(db: Pool, tokenHash: Buffer): Pro
  * List all permissions for a user (via RBAC role assignments).
  */
 export async function listPermissionsForUser(db: Pool, userId: string): Promise<string[]> {
+  // RBAC model:
+  // user -> (rbac_user_roles) -> role -> (rbac_role_permissions) -> permission
+  // Why: roles group permissions; permissions are the granular checks.
   const res = await db.query<{ code: string }>(
     `SELECT DISTINCT p.code
      FROM rbac_permissions p
@@ -200,6 +209,8 @@ export async function checkUserHasPermission(
  * Execute a database transaction with the provided callback.
  */
 export async function executeTransaction<T>(db: Pool, callback: () => Promise<T>): Promise<T> {
+  // Why: refresh token rotation must be atomic (revoke old + store new).
+  // If removed: partial failures could leave multiple valid refresh tokens.
   await db.query('BEGIN');
   try {
     const result = await callback();

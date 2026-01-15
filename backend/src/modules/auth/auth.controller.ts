@@ -50,14 +50,18 @@ export type RequestMeta = {
  * Extract IP and user-agent from Fastify request.
  */
 function extractRequestMeta(request: FastifyRequest): RequestMeta {
+  // Why this exists: auth endpoints should record consistent security telemetry
+  // (IP, UA, requestId, method, path) for audit and incident response.
   const userAgent = request.headers['user-agent'];
   const requestIdHeader = request.headers['x-request-id'] ?? request.headers['x-correlation-id'];
+  // Why: prefer upstream correlation IDs when present; otherwise fall back to Fastify's request.id.
   const requestId = typeof requestIdHeader === 'string' && requestIdHeader.trim() ? requestIdHeader.trim() : String(request.id);
   return {
     ip: request.ip,
     userAgent: typeof userAgent === 'string' ? userAgent : undefined,
     requestId,
     httpMethod: request.method,
+    // Why: store the *path only* (strip querystring) to avoid leaking sensitive data in logs.
     httpPath: typeof request.raw.url === 'string' ? request.raw.url.split('?')[0] : undefined
   };
 }
@@ -69,6 +73,8 @@ export async function handleAdminLogin(
   db: Pool,
   request: FastifyRequest<{ Body: RoleLoginBody }>
 ): Promise<AdminLoginResponse> {
+  // Controller responsibility: extract meta + pass validated body into service.
+  // If removed: business logic would creep into route handlers and become harder to test/reason about.
   const meta = extractRequestMeta(request);
   return await authenticateUserWithCredentials(db, 'ADMIN', request.body, meta);
 }
@@ -81,6 +87,8 @@ export async function handleRoleLogin(
   role: Exclude<UserRole, 'ADMIN'>,
   request: FastifyRequest<{ Body: RoleLoginBody }>
 ): Promise<TokenResponse> {
+  // Key enforcement point: `role` is supplied by the route namespace (/driver vs /passenger).
+  // The service + repository enforce this role when selecting the user.
   const meta = extractRequestMeta(request);
   return await authenticateUserWithCredentials(db, role, request.body, meta);
 }
@@ -150,6 +158,7 @@ export async function handleRefreshSession(
   role: UserRole,
   request: FastifyRequest<{ Body: RefreshBody }>
 ): Promise<TokenResponse> {
+  // Refresh is role-scoped for the same reason as login: a token must not "move" between role namespaces.
   const meta = extractRequestMeta(request);
   return await refreshUserSession(db, role, request.body, meta);
 }

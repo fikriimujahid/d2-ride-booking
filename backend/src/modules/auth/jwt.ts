@@ -32,16 +32,26 @@ type MfaChallengeTokenClaims = {
 const accessSecret = new TextEncoder().encode(env.jwtAccessSecret);
 const refreshSecret = new TextEncoder().encode(env.jwtRefreshSecret);
 
+// Why two secrets: access and refresh tokens have different risk profiles.
+// If removed (single secret): compromising one token class compromises both, weakening containment.
+
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
 
 export function hashToken(token: string): Buffer {
+  // Why: we store only a hash of the refresh token in DB.
+  // If DB leaks, attackers can't directly replay refresh tokens from stored hashes.
   return crypto.createHash('sha256').update(token).digest();
 }
 
 export async function signAccessToken(user: AuthenticatedUser): Promise<{ token: string; exp: number }> {
   const exp = nowSeconds() + env.jwtAccessTtlSeconds;
+  // Access token contains only minimal claims:
+  // - sub (user id)
+  // - role (system role)
+  // - typ (token type)
+  // Why: keep JWT small, and avoid placing mutable authorization data in tokens.
   const token = await new SignJWT({ role: user.role, typ: 'access' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(user.userId)
@@ -55,6 +65,8 @@ export async function signAccessToken(user: AuthenticatedUser): Promise<{ token:
 export async function signRefreshToken(user: AuthenticatedUser, jti: string): Promise<{ token: string; exp: number }>
 {
   const exp = nowSeconds() + env.jwtRefreshTtlSeconds;
+  // Refresh token includes a unique ID (jti) so we can rotate/revoke server-side.
+  // If removed: refresh tokens become non-revocable (stateless) and logout/revocation stops working.
   const token = await new SignJWT({ role: user.role, typ: 'refresh' })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(user.userId)
@@ -100,14 +112,18 @@ export async function signMfaChallengeToken(user: AuthenticatedUser): Promise<{ 
 
 export async function verifyAccessToken(token: string): Promise<AccessTokenClaims> {
   try {
+    // Verifies signature + exp/nbf claims via jose.
     const { payload } = await jwtVerify(token, accessSecret, { algorithms: ['HS256'] });
     if (payload.typ !== 'access') {
+      // Why: prevents token confusion (e.g., using refresh token as access token).
       throw new AppError('Invalid token type', { statusCode: 401, code: 'UNAUTHORIZED' });
     }
     if (typeof payload.sub !== 'string' || typeof payload.role !== 'string') {
+      // Why: never trust JWT claims blindly; validate types.
       throw new AppError('Invalid token payload', { statusCode: 401, code: 'UNAUTHORIZED' });
     }
     if (payload.role !== 'ADMIN' && payload.role !== 'DRIVER' && payload.role !== 'PASSENGER') {
+      // Why: role is an enum in our system; reject unknown roles even if token verifies.
       throw new AppError('Invalid token role', { statusCode: 401, code: 'UNAUTHORIZED' });
     }
 
@@ -115,6 +131,7 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
   } catch (err) {
     if (err instanceof AppError) throw err;
     if (err instanceof JoseErrors.JWTExpired) {
+      // Used by clients to distinguish "expired" vs "invalid".
       throw new AppError('Token expired', { statusCode: 401, code: 'TOKEN_EXPIRED', cause: err });
     }
     throw new AppError('Invalid token', { statusCode: 401, code: 'UNAUTHORIZED', cause: err });
@@ -123,11 +140,13 @@ export async function verifyAccessToken(token: string): Promise<AccessTokenClaim
 
 export async function verifyRefreshToken(token: string): Promise<RefreshTokenClaims> {
   try {
+    // Refresh token uses a different secret than access token.
     const { payload } = await jwtVerify(token, refreshSecret, { algorithms: ['HS256'] });
     if (payload.typ !== 'refresh') {
       throw new AppError('Invalid token type', { statusCode: 401, code: 'UNAUTHORIZED' });
     }
     if (typeof payload.sub !== 'string' || typeof payload.role !== 'string' || typeof payload.jti !== 'string') {
+      // Why: we require jti for rotation/revocation tracking.
       throw new AppError('Invalid token payload', { statusCode: 401, code: 'UNAUTHORIZED' });
     }
     if (payload.role !== 'ADMIN' && payload.role !== 'DRIVER' && payload.role !== 'PASSENGER') {

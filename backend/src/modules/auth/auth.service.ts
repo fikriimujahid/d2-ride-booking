@@ -98,6 +98,8 @@ function normalizeEmail(email: string): string {
  * Validate login input (email format, OTP format if provided).
  */
 export function validateLoginInput(body: RoleLoginBody): void {
+  // Why: validate external input early (defense-in-depth).
+  // If removed: downstream code might accept malformed emails/OTPs and behave inconsistently.
   const email = body.email.trim();
   if (!isEmail(email)) {
     throw createValidationError('Login requires a valid email');
@@ -125,8 +127,14 @@ async function issueTokenPair(
   authUser: AuthenticatedUser,
   meta?: RequestMeta
 ): Promise<TokenResponse> {
+  // Why: refresh tokens are tracked/rotated by ID (jti) stored in DB.
+  // If removed: logout/revocation and rotation become impossible.
   const refreshId = generateTokenId();
+
+  // Access token is short-lived and not stored server-side.
   const { token: accessToken } = await signAccessToken(authUser);
+
+  // Refresh token is long-lived and stored server-side as a hash.
   const { token: refreshToken, exp: refreshExp } = await signRefreshToken(authUser, refreshId);
 
   const tokenHash = hashToken(refreshToken);
@@ -195,13 +203,20 @@ export async function authenticateUserWithCredentials(
   meta?: RequestMeta
 ): Promise<TokenResponse | Admin2faSetupRequiredResponse | AdminMfaChallengeResponse>
 {
+  // Step 0: reject invalid input early.
   validateLoginInput(input);
 
   const email = normalizeEmail(input.email);
+
+  // CRITICAL enforcement: this lookup includes `role`.
+  // This is what enforces "admin cannot log in via driver/passenger frontend" server-side.
+  // If removed: a valid admin email/password could authenticate on /driver/auth/login.
   const user = await findActiveUserByEmailAndRole(db, email, role);
 
   // Use generic error to avoid leaking user existence or inactive status
   if (!user || !user.is_active) {
+    // Why: do not leak whether the user exists or is inactive.
+    // If removed: attackers can enumerate accounts by timing/messages.
     await tryInsertSecurityEvent(db, {
       requestId: meta?.requestId,
       eventType: 'auth.login_attempt',
@@ -219,6 +234,7 @@ export async function authenticateUserWithCredentials(
     throw createInvalidCredentialsError();
   }
 
+  // Step 1: verify password using scrypt + timingSafeEqual.
   const passwordValid = await verifyPassword(input.password, user.password_hash);
   if (!passwordValid) {
     await tryInsertSecurityEvent(db, {
@@ -243,10 +259,13 @@ export async function authenticateUserWithCredentials(
 
   // Admin-specific: check 2FA enrollment
   if (role === 'ADMIN') {
+    // Admin auth is multi-step (TOTP enrollment + challenge).
+    // If removed: admin login becomes single-factor and weakens security guarantees.
     const totp = await getUserTotpConfig(db, user.id);
     
     if (!totp || !totp.enabled) {
       // 2FA not enrolled - return setup token
+      // Why: setup token is limited-scope and short-lived (totp_setup typ).
       const { token: setupToken, exp } = await signTotpSetupToken(authUser);
 
       await tryInsertSecurityEvent(db, {
@@ -272,6 +291,7 @@ export async function authenticateUserWithCredentials(
     }
 
     // 2FA enrolled - return MFA challenge (Cognito-style)
+    // Why: challenge token (mfa_challenge typ) limits what can be done before OTP is verified.
     const { token: session, exp } = await signMfaChallengeToken(authUser);
 
     await tryInsertSecurityEvent(db, {
@@ -297,6 +317,7 @@ export async function authenticateUserWithCredentials(
   }
 
   // Driver/Passenger: issue tokens directly
+  // Why: these roles do not require 2FA in this phase.
   const tokenRes = await issueTokenPair(db, authUser, meta);
   await tryInsertSecurityEvent(db, {
     requestId: meta?.requestId,
@@ -328,14 +349,19 @@ export async function exchangeMfaChallengeForTokens(
   meta?: RequestMeta
 ): Promise<TokenResponse> {
   try {
+    // Step 1: verify the challenge token (signature, expiry, typ).
     const claims = await verifyMfaChallengeToken(input.session);
 
     const admin = await findAdminById(db, claims.sub);
     if (!admin || !admin.is_active) {
+      // If removed: disabled admins could still complete MFA and receive tokens.
       throw createUnauthorizedError();
     }
 
+    // Step 2: verify OTP against the stored encrypted TOTP secret.
     await verifyAdminTotpCode(db, claims.sub, input.otp);
+
+    // Step 3: issue access + refresh tokens.
     const tokenRes = await issueTokenPair(db, { userId: claims.sub, role: 'ADMIN' }, meta);
 
     await tryInsertSecurityEvent(db, {
@@ -513,12 +539,16 @@ export async function refreshUserSession(
   meta?: RequestMeta
 ): Promise<TokenResponse> {
   try {
+    // Step 1: verify refresh JWT (signature, expiry, typ, jti).
     const claims = await verifyRefreshToken(input.refreshToken);
     
     if (claims.role !== role) {
+      // Why: refresh is role-scoped by route namespace.
+      // If removed: a token minted for one role could be replayed against another role's refresh endpoint.
       throw createUnauthorizedError('Invalid refresh token');
     }
 
+    // Step 2: locate refresh token in DB using a hash (never store raw token).
     const tokenHash = hashToken(input.refreshToken);
     const tokenRow = await findRefreshTokenByHash(db, tokenHash);
 
@@ -526,12 +556,15 @@ export async function refreshUserSession(
       throw createUnauthorizedError('Invalid refresh token');
     }
     if (tokenRow.revoked_at) {
+      // If removed: revoked tokens could be reused indefinitely.
       throw createUnauthorizedError('Refresh token revoked');
     }
     if (tokenRow.user_id !== claims.sub || tokenRow.id !== claims.jti) {
+      // Why: bind DB row to JWT claims to prevent token substitution.
       throw createUnauthorizedError('Refresh token mismatch');
     }
 
+    // Step 3: rotate refresh token (old revoked, new issued).
     const refreshId = generateTokenId();
     const authUser: AuthenticatedUser = { userId: claims.sub, role: claims.role };
 
@@ -542,6 +575,7 @@ export async function refreshUserSession(
 
     // Token rotation: revoke old, store new
     await executeTransaction(db, async () => {
+      // If removed: race conditions could allow multiple valid refresh tokens from one old token.
       await revokeAndReplaceRefreshToken(db, tokenRow.id, refreshId);
       await storeRefreshToken(db, refreshId, claims.sub, newTokenHash, refreshExp, meta);
     });
@@ -589,6 +623,7 @@ export async function refreshUserSession(
 export async function revokeUserSession(db: Pool, input: { refreshToken: string }, meta?: RequestMeta): Promise<void> {
   let tokenHash: Buffer;
   try {
+    // Hashing can throw if token is not a string-like input; we treat malformed logout as no-op.
     tokenHash = hashToken(input.refreshToken);
   } catch {
     // Invalid token format - fail silently
@@ -596,6 +631,8 @@ export async function revokeUserSession(db: Pool, input: { refreshToken: string 
   }
 
   const tokenRow = await findRefreshTokenByHash(db, tokenHash);
+  // Best-effort revoke: we do not reveal whether the token existed.
+  // If removed: logout becomes an oracle for token validity.
   await revokeRefreshTokenByHash(db, tokenHash);
 
   await tryInsertSecurityEvent(db, {

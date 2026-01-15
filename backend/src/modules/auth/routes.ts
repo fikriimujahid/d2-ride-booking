@@ -34,6 +34,9 @@ import { env } from '../../config/env.js';
 import { requireAuth, requireRole, requireTotpSetupAuth } from './middleware.js';
 
 function rolePrefix(role: UserRole): string {
+  // Why this exists: each system role has a dedicated URL namespace.
+  // This makes the intended client boundary explicit (admin UI calls /admin/*, etc)
+  // and keeps auth flows role-scoped.
   switch (role) {
     case 'ADMIN':
       return '/admin';
@@ -45,10 +48,13 @@ function rolePrefix(role: UserRole): string {
 }
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
+  // One plugin, one server, one port: routes are mounted into the modular monolith Fastify app.
   const roles: readonly UserRole[] = ['ADMIN', 'DRIVER', 'PASSENGER'];
 
   for (const role of roles) {
     const prefix = rolePrefix(role);
+
+    // Why this exists: swagger examples are role-specific so seeded accounts are easy to test.
     const exampleEmail =
       role === 'ADMIN'
         ? env.seedAdminEmail
@@ -71,6 +77,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     };
 
     if (role === 'ADMIN') {
+      // ADMIN login is intentionally *not* the same as driver/passenger.
+      // Admin requires TOTP 2FA: this endpoint returns either:
+      // - a setup token (admin must enroll TOTP), OR
+      // - an MFA challenge session token (admin must supply an OTP).
       app.post<{ Body: RoleLoginBody; Reply: AdminLoginResponse }>(
         `${prefix}/auth/login`,
         {
@@ -106,6 +116,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         }
       );
     } else {
+      // DRIVER/PASSENGER login is role-scoped and returns tokens directly.
+      // IMPORTANT: The `role` passed here is enforced server-side by querying users WHERE role = $1.
+      // If removed: a user could authenticate via the wrong frontend (e.g., ADMIN credentials via /driver/auth/login).
+      // That would violate the intended client boundary and complicate authorization assumptions.
       app.post<{ Body: RoleLoginBody; Reply: TokenResponse }>(
         `${prefix}/auth/login`,
         {
@@ -125,6 +139,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     }
 
     if (role === 'ADMIN') {
+      // These endpoints are protected by a *setup token* (totp_setup) rather than an access token.
+      // Why: before TOTP is enabled, admins must still be able to enroll without being fully "signed in".
       app.post<{ Reply: Admin2faSetupResponse }>(
         `${prefix}/auth/2fa/setup`,
         {
@@ -163,6 +179,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
       app.get<{ Reply: { permissions: string[] } }>(
         `${prefix}/auth/permissions`,
         {
+          // Why: permissions are only meaningful for ADMIN RBAC.
+          // If removed: any authenticated role could introspect admin permissions, leaking authorization metadata.
           preHandler: [requireAuth(), requireRole(['ADMIN'])],
           schema: {
             tags: ['auth '+role],
@@ -201,6 +219,8 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
         }
       },
       async (request) => {
+        // Refresh is also role-scoped.
+        // If removed: refresh tokens could be replayed across role namespaces.
         return await handleRefreshSession(app.db, role, request);
       }
     );
