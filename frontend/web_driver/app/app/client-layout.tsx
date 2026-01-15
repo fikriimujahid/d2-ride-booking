@@ -6,7 +6,8 @@ import { DashboardSidebar } from "@/components/dashboard-sidebar"
 import { useEffect, useState } from "react"
 import { Menu } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
-import { getSession } from "@/lib/auth/client"
+import { buildLoginHref, shouldForceLogout } from "@/lib/auth/auth.guard"
+import * as authStore from "@/lib/auth/auth.store"
 
 export default function ClientDashboardLayout({
   children,
@@ -23,15 +24,23 @@ export default function ClientDashboardLayout({
     let mounted = true
 
     ;(async () => {
-      const session = await getSession()
+      // Why: this app is statically exported, so auth is guarded client-side.
+      // Backend still owns authorization; we only fail closed for obvious cross-role tokens.
+      if (shouldForceLogout()) {
+        await authStore.logoutBestEffort()
+        router.replace(buildLoginHref(pathname || "/app"))
+        return
+      }
+
+      const session = authStore.getSession()
       if (!session.authenticated) {
-        router.replace(`/login/?next=${encodeURIComponent(pathname || "/app")}`)
+        router.replace(buildLoginHref(pathname || "/app"))
         return
       }
 
       if (mounted) setAuthChecked(true)
     })().catch(() => {
-      router.replace(`/login/?next=${encodeURIComponent(pathname || "/app")}`)
+      router.replace(buildLoginHref(pathname || "/app"))
     })
 
     return () => {
@@ -39,7 +48,13 @@ export default function ClientDashboardLayout({
     }
   }, [router, pathname])
 
-  if (!authChecked) return null
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-secondary">Loading...</div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-screen">

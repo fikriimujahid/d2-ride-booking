@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { LayoutDashboard, TrendingUp, Navigation, User, LogOut } from "lucide-react"
-import { driverLogout } from "@/lib/auth/client"
+import { logoutBestEffort } from "@/lib/auth/auth.store"
 
 export function DashboardSidebar() {
   const pathname = usePathname()
@@ -54,7 +54,7 @@ export function DashboardSidebar() {
       <div className="p-4 border-t border-border">
         <button
           onClick={async () => {
-            await driverLogout()
+            await logoutBestEffort()
             router.push("/login")
           }}
           className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-secondary hover:bg-border hover:text-foreground transition-colors"

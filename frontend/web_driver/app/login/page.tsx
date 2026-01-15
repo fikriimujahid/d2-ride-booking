@@ -7,7 +7,7 @@ import { Header } from "@/components/header"
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { driverLogin } from "@/lib/auth/client"
+import { loginWithPassword } from "@/lib/auth/auth.store"
 
 function LoginPageContent() {
   const router = useRouter()
@@ -22,7 +22,7 @@ function LoginPageContent() {
     setError(null)
     setSubmitting(true)
     try {
-      const result = await driverLogin(email, password)
+      const result = await loginWithPassword(email, password)
       if (!result.ok) {
         setError(result.message)
         return

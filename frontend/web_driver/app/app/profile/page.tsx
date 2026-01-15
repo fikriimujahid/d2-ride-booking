@@ -4,8 +4,11 @@ import { mockDriver } from "@/lib/mock-data"
 import { Mail, Phone, Car, CreditCard, Edit2, LogOut } from "lucide-react"
 import Image from "next/image"
 import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { logoutBestEffort } from "@/lib/auth/auth.store"
 
 export default function ProfilePage() {
+  const router = useRouter()
   const [isEditing, setIsEditing] = useState(false)
 
   return (
@@ -161,7 +164,13 @@ export default function ProfilePage() {
       </div>
 
       {/* Logout Button */}
-      <button className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-500/10 text-red-500 rounded-lg border border-red-500/30 hover:bg-red-500/20 transition-colors font-semibold">
+      <button
+        onClick={async () => {
+          await logoutBestEffort()
+          router.push("/login")
+        }}
+        className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-500/10 text-red-500 rounded-lg border border-red-500/30 hover:bg-red-500/20 transition-colors font-semibold"
+      >
         <LogOut className="w-5 h-5" />
         Logout
       </button>
