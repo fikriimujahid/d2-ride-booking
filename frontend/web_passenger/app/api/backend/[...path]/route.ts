@@ -4,6 +4,7 @@ import { AUTH_COOKIES } from "@/lib/auth/cookies"
 import { clearAuthCookies } from "@/lib/auth/tokenStore"
 import { TokenResponseSchema } from "@/lib/auth/schemas"
 import { passengerRefresh } from "@/lib/auth/upstream"
+import { getJwtUserType } from "@/lib/auth/jwt"
 import { getServerApiBaseUrl } from "@/lib/config/apiBaseUrl"
 
 const SUPPORTED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const
@@ -50,6 +51,20 @@ async function proxy(req: NextRequest, params: { path: string[] }) {
   if (!accessToken) {
     await clearAuthCookies()
     return NextResponse.json({ message: "Missing access token" }, { status: 401 })
+  }
+
+  // Defensive: ensure this proxy is only used with PASSENGER tokens.
+  // Backend remains the source of truth for authorization.
+  try {
+    const role = getJwtUserType(accessToken)
+    if (role && role !== "PASSENGER") {
+      await clearAuthCookies()
+      return NextResponse.json({ message: "Forbidden" }, { status: 403 })
+    }
+  } catch {
+    // If token can't be decoded, treat as unauthorized and clear cookies.
+    await clearAuthCookies()
+    return NextResponse.json({ message: "Unauthorized" }, { status: 401 })
   }
 
   const url = new URL(`${baseUrl.replace(/\/$/, "")}/${params.path.join("/")}`)

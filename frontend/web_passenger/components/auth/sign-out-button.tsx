@@ -2,12 +2,13 @@
 
 import { useRouter } from "next/navigation"
 import { LogOut } from "lucide-react"
+import { authStore } from "@/lib/auth/auth.store"
 
 export function SignOutButton() {
   const router = useRouter()
 
   const onClick = async () => {
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined)
+    await authStore.logoutBestEffort()
     router.push("/login")
     router.refresh()
   }

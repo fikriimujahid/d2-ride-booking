@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { getErrorMessage } from "@/lib/auth/schemas"
+import { authStore } from "@/lib/auth/auth.store"
 
 export default function LoginClient() {
   const router = useRouter()
@@ -24,15 +24,9 @@ export default function LoginClient() {
     setError(null)
     setIsSubmitting(true)
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      })
-
-      if (!res.ok) {
-        const payload: unknown = await res.json().catch(() => undefined)
-        setError(getErrorMessage(payload) ?? "Invalid credentials")
+      const result = await authStore.loginWithPassword(email, password)
+      if (!result.ok) {
+        setError(result.message)
         return
       }
 

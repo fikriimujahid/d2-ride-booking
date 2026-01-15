@@ -23,3 +23,10 @@ export class ForbiddenError extends ApiError {
     this.name = "ForbiddenError"
   }
 }
+
+export class NetworkError extends ApiError {
+  constructor() {
+    super("Network error", 0)
+    this.name = "NetworkError"
+  }
+}

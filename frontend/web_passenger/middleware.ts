@@ -1,25 +1,25 @@
 import { NextResponse, type NextRequest } from "next/server"
-
-const REFRESH_COOKIE = "rg_rt"
-
-function isProtectedPath(pathname: string) {
-  return pathname.startsWith("/app")
-}
-
-function isAuthPage(pathname: string) {
-  return pathname === "/login" || pathname === "/register"
-}
+import { getAuthCookiesFromRequest, isAuthPage, isNonPassengerAccessToken, isProtectedPath, buildLoginRedirect } from "@/lib/auth/guards"
 
 export function middleware(req: NextRequest) {
   const { pathname, search } = req.nextUrl
-  const hasRefresh = Boolean(req.cookies.get(REFRESH_COOKIE)?.value)
+  const { accessToken, refreshToken } = getAuthCookiesFromRequest(req)
+  const hasRefresh = Boolean(refreshToken)
 
-  if (isProtectedPath(pathname) && !hasRefresh) {
-    const next = encodeURIComponent(pathname + search)
+  // Passenger-only enforcement (defensive).
+  if (isNonPassengerAccessToken(accessToken)) {
     const url = req.nextUrl.clone()
     url.pathname = "/login"
-    url.search = `?next=${next}`
-    return NextResponse.redirect(url)
+    url.search = ""
+    const res = NextResponse.redirect(url)
+    // Clear potentially invalid cookies.
+    res.cookies.set("rg_at", "", { path: "/", maxAge: 0 })
+    res.cookies.set("rg_rt", "", { path: "/", maxAge: 0 })
+    return res
+  }
+
+  if (isProtectedPath(pathname) && !hasRefresh) {
+    return NextResponse.redirect(buildLoginRedirect(req))
   }
 
   if (isAuthPage(pathname) && hasRefresh) {
