@@ -4,6 +4,7 @@ import './config/env.js';
 import { env } from './config/env.js';
 import { dbPlugin } from './plugins/db.js';
 import { corsPlugin } from './plugins/cors.js';
+import { apiDbLoggerPlugin } from './plugins/api-db-logger.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { swaggerPlugin } from './plugins/swagger.js';
 import { healthRoutes } from './modules/health/routes.js';
@@ -49,6 +50,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
   // Cross-cutting plugins
   void app.register(corsPlugin);
   void app.register(dbPlugin);
+  void app.register(apiDbLoggerPlugin);
   void app.register(swaggerPlugin);
   void app.register(errorHandlerPlugin);
 

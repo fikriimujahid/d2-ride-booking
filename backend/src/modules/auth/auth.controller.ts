@@ -41,6 +41,9 @@ import { createUnauthorizedError } from './auth.errors.js';
 export type RequestMeta = {
   ip?: string;
   userAgent?: string;
+  requestId?: string;
+  httpMethod?: string;
+  httpPath?: string;
 };
 
 /**
@@ -48,9 +51,14 @@ export type RequestMeta = {
  */
 function extractRequestMeta(request: FastifyRequest): RequestMeta {
   const userAgent = request.headers['user-agent'];
+  const requestIdHeader = request.headers['x-request-id'] ?? request.headers['x-correlation-id'];
+  const requestId = typeof requestIdHeader === 'string' && requestIdHeader.trim() ? requestIdHeader.trim() : String(request.id);
   return {
     ip: request.ip,
-    userAgent: typeof userAgent === 'string' ? userAgent : undefined
+    userAgent: typeof userAgent === 'string' ? userAgent : undefined,
+    requestId,
+    httpMethod: request.method,
+    httpPath: typeof request.raw.url === 'string' ? request.raw.url.split('?')[0] : undefined
   };
 }
 
@@ -99,7 +107,8 @@ export async function handleAdmin2faSetup(
   if (!userId) {
     throw createUnauthorizedError();
   }
-  return await createTotpSetupForAdmin(db, userId);
+  const meta = extractRequestMeta(request);
+  return await createTotpSetupForAdmin(db, userId, meta);
 }
 
 /**
@@ -152,6 +161,7 @@ export async function handleLogout(
   db: Pool,
   request: FastifyRequest<{ Body: LogoutBody }>
 ): Promise<{ ok: boolean }> {
-  await revokeUserSession(db, request.body);
+  const meta = extractRequestMeta(request);
+  await revokeUserSession(db, request.body, meta);
   return { ok: true };
 }

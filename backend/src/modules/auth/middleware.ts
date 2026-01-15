@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { verifyAccessToken, verifyTotpSetupToken } from './jwt.js';
 import type { AuthenticatedUser, PermissionCode, UserRole } from './types.js';
 import { userHasPermission } from './auth.service.js';
+import { tryInsertSecurityEvent } from '../../shared/security-events.js';
 import {
   createForbiddenError,
   createInsufficientPermissionsError,
@@ -78,6 +79,22 @@ export function requirePermission(permission: PermissionCode) {
 
     const ok = await userHasPermission(request.server.db, user.userId, permission);
     if (!ok) {
+      await tryInsertSecurityEvent(request.server.db, {
+        requestId: (request as FastifyRequest & { auditRequestId?: string }).auditRequestId ?? String(request.id),
+        eventType: 'auth.permission_denied',
+        actorUserId: user.userId,
+        actorSystemRole: user.role,
+        action: 'permission_denied',
+        success: false,
+        failureReason: 'INSUFFICIENT_PERMISSIONS',
+        ip: request.ip,
+        userAgent: typeof request.headers['user-agent'] === 'string' ? request.headers['user-agent'] : undefined,
+        httpMethod: request.method,
+        httpPath: typeof request.raw.url === 'string' ? request.raw.url.split('?')[0] : undefined,
+        httpStatusCode: 403,
+        errorCode: 'INSUFFICIENT_PERMISSIONS',
+        details: { requiredPermission: permission }
+      });
       throw createInsufficientPermissionsError();
     }
   };

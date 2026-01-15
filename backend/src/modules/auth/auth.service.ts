@@ -25,6 +25,8 @@
  */
 
 import type { Pool } from 'pg';
+import { isAppError } from '../../shared/errors.js';
+import { tryInsertSecurityEvent } from '../../shared/security-events.js';
 import type {
   Admin2faSetupRequiredResponse,
   Admin2faSetupResponse,
@@ -75,6 +77,9 @@ import {
 export type RequestMeta = {
   ip?: string;
   userAgent?: string;
+  requestId?: string;
+  httpMethod?: string;
+  httpPath?: string;
 };
 
 // ========================================
@@ -197,11 +202,40 @@ export async function authenticateUserWithCredentials(
 
   // Use generic error to avoid leaking user existence or inactive status
   if (!user || !user.is_active) {
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.login_attempt',
+      actorSystemRole: role,
+      action: 'login',
+      success: false,
+      failureReason: 'INVALID_CREDENTIALS',
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 401,
+      errorCode: 'INVALID_CREDENTIALS'
+    });
     throw createInvalidCredentialsError();
   }
 
   const passwordValid = await verifyPassword(input.password, user.password_hash);
   if (!passwordValid) {
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.login_attempt',
+      actorUserId: user.id,
+      actorSystemRole: user.role,
+      action: 'login',
+      success: false,
+      failureReason: 'INVALID_CREDENTIALS',
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 401,
+      errorCode: 'INVALID_CREDENTIALS'
+    });
     throw createInvalidCredentialsError();
   }
 
@@ -214,6 +248,22 @@ export async function authenticateUserWithCredentials(
     if (!totp || !totp.enabled) {
       // 2FA not enrolled - return setup token
       const { token: setupToken, exp } = await signTotpSetupToken(authUser);
+
+      await tryInsertSecurityEvent(db, {
+        requestId: meta?.requestId,
+        eventType: 'auth.login_attempt',
+        actorUserId: user.id,
+        actorSystemRole: user.role,
+        action: 'login',
+        success: true,
+        ip: meta?.ip,
+        userAgent: meta?.userAgent,
+        httpMethod: meta?.httpMethod,
+        httpPath: meta?.httpPath,
+        httpStatusCode: 200,
+        details: { nextStep: 'totp_setup_required' }
+      });
+
       return { 
         twoFactorRequired: true, 
         setupToken, 
@@ -223,6 +273,22 @@ export async function authenticateUserWithCredentials(
 
     // 2FA enrolled - return MFA challenge (Cognito-style)
     const { token: session, exp } = await signMfaChallengeToken(authUser);
+
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.login_attempt',
+      actorUserId: user.id,
+      actorSystemRole: user.role,
+      action: 'login',
+      success: true,
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 200,
+      details: { challengeName: 'SOFTWARE_TOKEN_MFA' }
+    });
+
     return { 
       challengeName: 'SOFTWARE_TOKEN_MFA', 
       session, 
@@ -231,7 +297,21 @@ export async function authenticateUserWithCredentials(
   }
 
   // Driver/Passenger: issue tokens directly
-  return await issueTokenPair(db, authUser, meta);
+  const tokenRes = await issueTokenPair(db, authUser, meta);
+  await tryInsertSecurityEvent(db, {
+    requestId: meta?.requestId,
+    eventType: 'auth.login_attempt',
+    actorUserId: user.id,
+    actorSystemRole: user.role,
+    action: 'login',
+    success: true,
+    ip: meta?.ip,
+    userAgent: meta?.userAgent,
+    httpMethod: meta?.httpMethod,
+    httpPath: meta?.httpPath,
+    httpStatusCode: 200
+  });
+  return tokenRes;
 }
 
 // ========================================
@@ -247,15 +327,50 @@ export async function exchangeMfaChallengeForTokens(
   input: AdminMfaRespondBody,
   meta?: RequestMeta
 ): Promise<TokenResponse> {
-  const claims = await verifyMfaChallengeToken(input.session);
+  try {
+    const claims = await verifyMfaChallengeToken(input.session);
 
-  const admin = await findAdminById(db, claims.sub);
-  if (!admin || !admin.is_active) {
-    throw createUnauthorizedError();
+    const admin = await findAdminById(db, claims.sub);
+    if (!admin || !admin.is_active) {
+      throw createUnauthorizedError();
+    }
+
+    await verifyAdminTotpCode(db, claims.sub, input.otp);
+    const tokenRes = await issueTokenPair(db, { userId: claims.sub, role: 'ADMIN' }, meta);
+
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.mfa.totp.verify_attempt',
+      actorUserId: claims.sub,
+      actorSystemRole: 'ADMIN',
+      action: 'mfa_challenge_respond',
+      success: true,
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 200
+    });
+
+    return tokenRes;
+  } catch (err) {
+    const errorCode = isAppError(err) ? err.code : 'INTERNAL_ERROR';
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.mfa.totp.verify_attempt',
+      actorSystemRole: 'ADMIN',
+      action: 'mfa_challenge_respond',
+      success: false,
+      failureReason: errorCode,
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 401,
+      errorCode
+    });
+    throw err;
   }
-
-  await verifyAdminTotpCode(db, claims.sub, input.otp);
-  return await issueTokenPair(db, { userId: claims.sub, role: 'ADMIN' }, meta);
 }
 
 // ========================================
@@ -266,7 +381,11 @@ export async function exchangeMfaChallengeForTokens(
  * Create TOTP setup for admin (generate secret, QR code).
  * Requires admin to have email configured.
  */
-export async function createTotpSetupForAdmin(db: Pool, userId: string): Promise<Admin2faSetupResponse> {
+export async function createTotpSetupForAdmin(
+  db: Pool,
+  userId: string,
+  meta?: RequestMeta
+): Promise<Admin2faSetupResponse> {
   const email = await getAdminEmail(db, userId);
   if (!email) {
     throw createAuthConfigError('Admin must have email for TOTP');
@@ -281,6 +400,20 @@ export async function createTotpSetupForAdmin(db: Pool, userId: string): Promise
   const secretEnc = encryptTotpSecret(setup.secretBase32);
 
   await upsertTotpSecret(db, userId, secretEnc);
+
+  await tryInsertSecurityEvent(db, {
+    requestId: meta?.requestId,
+    eventType: 'auth.mfa.totp.enroll_attempt',
+    actorUserId: userId,
+    actorSystemRole: 'ADMIN',
+    action: 'totp_setup_start',
+    success: true,
+    ip: meta?.ip,
+    userAgent: meta?.userAgent,
+    httpMethod: meta?.httpMethod,
+    httpPath: meta?.httpPath,
+    httpStatusCode: 200
+  });
 
   return setup;
 }
@@ -310,10 +443,39 @@ export async function enableTotpForAdmin(
   const secretBase32 = decryptTotpSecret(totp.secret_enc);
   const isValid = verifyTotpCode(secretBase32, input.otp);
   if (!isValid) {
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.mfa.totp.verify_attempt',
+      actorUserId: userId,
+      actorSystemRole: 'ADMIN',
+      action: 'totp_setup_verify',
+      success: false,
+      failureReason: 'INVALID_OTP',
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 401,
+      errorCode: 'INVALID_OTP'
+    });
     throw createInvalidOtpError();
   }
 
   await enableUserTotp(db, userId);
+
+  await tryInsertSecurityEvent(db, {
+    requestId: meta?.requestId,
+    eventType: 'auth.mfa.totp.enabled',
+    actorUserId: userId,
+    actorSystemRole: 'ADMIN',
+    action: 'totp_enabled',
+    success: true,
+    ip: meta?.ip,
+    userAgent: meta?.userAgent,
+    httpMethod: meta?.httpMethod,
+    httpPath: meta?.httpPath,
+    httpStatusCode: 200
+  });
 
   return await issueTokenPair(db, { userId, role: 'ADMIN' }, meta);
 }
@@ -350,47 +512,81 @@ export async function refreshUserSession(
   input: { refreshToken: string },
   meta?: RequestMeta
 ): Promise<TokenResponse> {
-  const claims = await verifyRefreshToken(input.refreshToken);
-  
-  if (claims.role !== role) {
-    throw createUnauthorizedError('Invalid refresh token');
+  try {
+    const claims = await verifyRefreshToken(input.refreshToken);
+    
+    if (claims.role !== role) {
+      throw createUnauthorizedError('Invalid refresh token');
+    }
+
+    const tokenHash = hashToken(input.refreshToken);
+    const tokenRow = await findRefreshTokenByHash(db, tokenHash);
+
+    if (!tokenRow) {
+      throw createUnauthorizedError('Invalid refresh token');
+    }
+    if (tokenRow.revoked_at) {
+      throw createUnauthorizedError('Refresh token revoked');
+    }
+    if (tokenRow.user_id !== claims.sub || tokenRow.id !== claims.jti) {
+      throw createUnauthorizedError('Refresh token mismatch');
+    }
+
+    const refreshId = generateTokenId();
+    const authUser: AuthenticatedUser = { userId: claims.sub, role: claims.role };
+
+    const { token: accessToken } = await signAccessToken(authUser);
+    const { token: refreshToken, exp: refreshExp } = await signRefreshToken(authUser, refreshId);
+    const newTokenHash = hashToken(refreshToken);
+    const expiresAt = new Date(refreshExp * 1000).toISOString();
+
+    // Token rotation: revoke old, store new
+    await executeTransaction(db, async () => {
+      await revokeAndReplaceRefreshToken(db, tokenRow.id, refreshId);
+      await storeRefreshToken(db, refreshId, claims.sub, newTokenHash, refreshExp, meta);
+    });
+
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.token_refresh',
+      actorUserId: claims.sub,
+      actorSystemRole: claims.role,
+      action: 'refresh',
+      success: true,
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 200,
+      details: { rotated: true }
+    });
+
+    return { accessToken, refreshToken, expiresAt };
+  } catch (err) {
+    const errorCode = isAppError(err) ? err.code : 'INTERNAL_ERROR';
+    await tryInsertSecurityEvent(db, {
+      requestId: meta?.requestId,
+      eventType: 'auth.token_refresh',
+      actorSystemRole: role,
+      action: 'refresh',
+      success: false,
+      failureReason: errorCode,
+      ip: meta?.ip,
+      userAgent: meta?.userAgent,
+      httpMethod: meta?.httpMethod,
+      httpPath: meta?.httpPath,
+      httpStatusCode: 401,
+      errorCode
+    });
+    throw err;
   }
-
-  const tokenHash = hashToken(input.refreshToken);
-  const tokenRow = await findRefreshTokenByHash(db, tokenHash);
-
-  if (!tokenRow) {
-    throw createUnauthorizedError('Invalid refresh token');
-  }
-  if (tokenRow.revoked_at) {
-    throw createUnauthorizedError('Refresh token revoked');
-  }
-  if (tokenRow.user_id !== claims.sub || tokenRow.id !== claims.jti) {
-    throw createUnauthorizedError('Refresh token mismatch');
-  }
-
-  const refreshId = generateTokenId();
-  const authUser: AuthenticatedUser = { userId: claims.sub, role: claims.role };
-
-  const { token: accessToken } = await signAccessToken(authUser);
-  const { token: refreshToken, exp: refreshExp } = await signRefreshToken(authUser, refreshId);
-  const newTokenHash = hashToken(refreshToken);
-  const expiresAt = new Date(refreshExp * 1000).toISOString();
-
-  // Token rotation: revoke old, store new
-  await executeTransaction(db, async () => {
-    await revokeAndReplaceRefreshToken(db, tokenRow.id, refreshId);
-    await storeRefreshToken(db, refreshId, claims.sub, newTokenHash, refreshExp, meta);
-  });
-
-  return { accessToken, refreshToken, expiresAt };
 }
 
 /**
  * Revoke user session (logout).
  * Best-effort: does not reveal whether token existed.
  */
-export async function revokeUserSession(db: Pool, input: { refreshToken: string }): Promise<void> {
+export async function revokeUserSession(db: Pool, input: { refreshToken: string }, meta?: RequestMeta): Promise<void> {
   let tokenHash: Buffer;
   try {
     tokenHash = hashToken(input.refreshToken);
@@ -399,5 +595,20 @@ export async function revokeUserSession(db: Pool, input: { refreshToken: string 
     return;
   }
 
+  const tokenRow = await findRefreshTokenByHash(db, tokenHash);
   await revokeRefreshTokenByHash(db, tokenHash);
+
+  await tryInsertSecurityEvent(db, {
+    requestId: meta?.requestId,
+    eventType: 'auth.logout',
+    actorUserId: tokenRow?.user_id,
+    action: 'logout',
+    success: true,
+    ip: meta?.ip,
+    userAgent: meta?.userAgent,
+    httpMethod: meta?.httpMethod,
+    httpPath: meta?.httpPath,
+    httpStatusCode: 200,
+    details: { tokenFound: !!tokenRow }
+  });
 }

@@ -96,7 +96,8 @@ describe('auth (role-specific endpoints)', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as OkResponse;
     expect(body.ok).toBe(true);
-    expect(queryMock).toHaveBeenCalledTimes(1);
+    // Best-effort: lookup token then revoke.
+    expect(queryMock).toHaveBeenCalledTimes(2);
 
     await app.close();
   });
