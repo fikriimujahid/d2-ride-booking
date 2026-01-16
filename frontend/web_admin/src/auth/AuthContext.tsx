@@ -8,7 +8,7 @@ import React, {
 } from "react";
 import { authStore } from "./authStore";
 import type { AuthUser } from "../app/api/types";
-import { authClient } from "./authClient";
+import { authClient } from "./authClient.ts";
 
 export type AuthStatus =
   | "UNAUTHENTICATED"
@@ -47,6 +47,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Logout is a UX/state transition first.
+    // We clear local auth state immediately (so UI becomes locked), then best-effort notify backend.
     void authClient.logout();
     setUser(null);
     setMfaChallenge(null);
@@ -55,6 +57,9 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Bootstrapping: on page refresh, rehydrate auth from sessionStorage.
+    // If the access token is expired, authClient.bootstrap() will refresh (using refresh token).
+    // If refresh fails, we fail closed and clear state.
     let cancelled = false;
     const run = async () => {
       try {
@@ -68,6 +73,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
             setMfaChallenge(null);
             setTotpSetup(null);
           } catch {
+            // Any bootstrap failure means we treat the session as invalid.
             authClient.clear();
             if (cancelled) return;
             setStatus("UNAUTHENTICATED");
@@ -87,6 +93,8 @@ export function AuthProvider(props: { children: React.ReactNode }) {
   }, []);
 
   const loginWithPassword = useCallback(async (email: string, password: string): Promise<AuthStatus> => {
+    // IMPORTANT: AuthContext does not "decide" security outcomes.
+    // It forwards credentials to the backend and maps backend responses to UI states.
     const result = await authClient.login(email, password);
 
     if (result.kind === "AUTHENTICATED") {
@@ -98,6 +106,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
     }
 
     if (result.kind === "MFA_CHALLENGE") {
+      // MFA challenge is stored in-memory only; no access/refresh tokens exist yet.
       setUser(null);
       setTotpSetup(null);
       setMfaChallenge({ session: result.session, expiresAt: result.expiresAt, email });
@@ -105,6 +114,7 @@ export function AuthProvider(props: { children: React.ReactNode }) {
       return "MFA_CHALLENGE";
     }
 
+    // MFA enrollment required: backend provides a setup token for the enrollment endpoints.
     setUser(null);
     setMfaChallenge(null);
     setTotpSetup({ setupToken: result.setupToken, expiresAt: result.expiresAt, email });

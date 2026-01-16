@@ -1,7 +1,9 @@
 import dotenv from 'dotenv';
 import crypto from 'node:crypto';
 
-dotenv.config();
+if (process.env.NODE_ENV !== 'production') {
+  dotenv.config();
+}
 
 export type NodeEnv = 'development' | 'test' | 'production';
 
@@ -32,16 +34,22 @@ type Env = {
   totpSetupTokenTtlSeconds: number;
   mfaChallengeTokenTtlSeconds: number;
 
-  seedAdminEmail: string;
-  seedAdminPassword: string;
-  seedDriverEmail: string;
-  seedDriverPassword: string;
-  seedPassengerEmail: string;
-  seedPassengerPassword: string;
-
+  seedAdminEmail: string | undefined;
+  seedAdminPassword: string | undefined;
+  seedDriverEmail: string | undefined;
+  seedDriverPassword: string | undefined;
+  seedPassengerEmail: string | undefined;
+  seedPassengerPassword: string | undefined;
   totpIssuer: string;
   totpEncryptionKeyBase64: string;
 };
+
+function parseBoolean(name: string, value: string | undefined, defaultValue = false): boolean {
+  if (value === undefined) return defaultValue;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  throw new Error(`Invalid ${name}: must be "true" or "false"`);
+}
 
 function parseNodeEnv(value: string | undefined): NodeEnv {
   switch (value) {
@@ -136,7 +144,7 @@ export const env: Readonly<Env> = {
   port: parsePort(process.env.PORT),
 
   corsOrigins: optionalString('CORS_ORIGINS'),
-  corsCredentials: process.env.CORS_CREDENTIALS ? process.env.CORS_CREDENTIALS === 'true' : true,
+  corsCredentials: parseBoolean('CORS_CREDENTIALS', process.env.CORS_CREDENTIALS, true),
 
   databaseUrl: process.env.DATABASE_URL,
 
@@ -147,7 +155,7 @@ export const env: Readonly<Env> = {
   pgPassword: process.env.PGPASSWORD,
 
   pgPoolMax: process.env.PGPOOL_MAX ? Number(process.env.PGPOOL_MAX) : 10,
-  pgSsl: process.env.PGSSL ? process.env.PGSSL === 'true' : false,
+  pgSsl: parseBoolean('PGSSL', process.env.PGSSL, false),
 
   jwtAccessSecret: getJwtSecret('JWT_ACCESS_SECRET', nodeEnv),
   jwtRefreshSecret: getJwtSecret('JWT_REFRESH_SECRET', nodeEnv),
@@ -158,14 +166,14 @@ export const env: Readonly<Env> = {
   mfaChallengeTokenTtlSeconds: parsePositiveInt('MFA_CHALLENGE_TOKEN_TTL_SECONDS', process.env.MFA_CHALLENGE_TOKEN_TTL_SECONDS ?? '300'),
 
   // Seed defaults (used for Swagger examples and db:seed)
-  seedAdminEmail: optionalString('SEED_ADMIN_EMAIL') ?? 'admin@example.com',
-  seedAdminPassword: optionalString('SEED_ADMIN_PASSWORD') ?? 'ChangeMe123!',
+  seedAdminEmail: optionalString('SEED_ADMIN_EMAIL'),
+  seedAdminPassword: optionalString('SEED_ADMIN_PASSWORD'),
 
-  seedDriverEmail: optionalString('SEED_DRIVER_EMAIL') ?? 'driver@example.com',
-  seedDriverPassword: optionalString('SEED_DRIVER_PASSWORD') ?? 'ChangeMe123!',
+  seedDriverEmail: optionalString('SEED_DRIVER_EMAIL'),
+  seedDriverPassword: optionalString('SEED_DRIVER_PASSWORD'),
 
-  seedPassengerEmail: optionalString('SEED_PASSENGER_EMAIL') ?? 'passenger@example.com',
-  seedPassengerPassword: optionalString('SEED_PASSENGER_PASSWORD') ?? 'ChangeMe123!',
+  seedPassengerEmail: optionalString('SEED_PASSENGER_EMAIL'),
+  seedPassengerPassword: optionalString('SEED_PASSENGER_PASSWORD'),
 
   totpIssuer: optionalString('TOTP_ISSUER') ?? 'D2 Ride Booking',
   totpEncryptionKeyBase64: getTotpEncryptionKeyBase64(nodeEnv)

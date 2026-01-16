@@ -20,6 +20,8 @@ export function ProtectedRoute({ requiredPermission, children }: ProtectedRouteP
   }
 
   if (status === "UNAUTHENTICATED") {
+    // If not authenticated, we redirect to /login and preserve where the user was trying to go.
+    // Note: this is a UX improvement; backend is still the real enforcement point.
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
@@ -32,6 +34,8 @@ export function ProtectedRoute({ requiredPermission, children }: ProtectedRouteP
   }
 
   if (requiredPermission && !hasPermission(requiredPermission)) {
+    // Authenticated but not authorized.
+    // We fail closed in the UI (navigate to a forbidden page) even though API calls would be denied anyway.
     return <Navigate to="/forbidden" replace />;
   }
 

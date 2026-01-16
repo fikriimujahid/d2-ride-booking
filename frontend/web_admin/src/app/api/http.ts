@@ -23,6 +23,9 @@ export async function apiRequest<T>(
   headers.set("Accept", "application/json");
 
   if (init.auth) {
+    // Authenticated API calls include the current access token.
+    // IMPORTANT: this token gates *backend* authorization.
+    // Frontend permission checks only hide UI and do not secure endpoints.
     const token = authStore.getAccessToken();
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
@@ -37,6 +40,9 @@ export async function apiRequest<T>(
 
   // Auto-refresh interceptor for authenticated requests
   if (init.auth && res.status === 401 && authStore.getRefreshToken()) {
+    // 401 usually means the access token is expired.
+    // We attempt refresh once, then retry the original request with the new token.
+    // If refresh fails, we fail closed and force a re-login.
     try {
       await authClient.refresh();
 
@@ -97,6 +103,8 @@ export async function apiRequest<T>(
 
     // Emit auth error events for auth-protected requests
     if (init.auth && typeof code === "string") {
+      // The App-level AuthErrorListener turns these events into consistent navigation
+      // (login redirect, forbidden page, MFA flow), instead of every screen handling it.
       if (
         code === "AUTH_UNAUTHENTICATED" ||
         code === "AUTH_TOKEN_EXPIRED" ||

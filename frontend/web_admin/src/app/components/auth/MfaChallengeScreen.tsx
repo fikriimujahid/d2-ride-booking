@@ -74,10 +74,13 @@ export function MfaChallengeScreen(props: { onCancel: () => void }) {
 
     try {
       setIsSubmitting(true);
+      // Backend validates OTP and returns tokens.
+      // AuthContext transitions to AUTHENTICATED on success.
       await submitMfaOtp(fullCode);
       // Navigation is handled by route guards based on explicit auth state.
     } catch (e) {
       const err = e as ApiError;
+      // Keep errors generic (no sensitive details).
       setError(err?.message || "Invalid code. Please try again.");
     } finally {
       setIsSubmitting(false);

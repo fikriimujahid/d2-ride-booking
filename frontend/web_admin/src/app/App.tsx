@@ -34,6 +34,8 @@ function AuthErrorListener() {
   useEffect(() => {
     return onAuthErrorEvent(({ code }) => {
       // SECURITY: backend is the source of truth.
+      // We listen for auth-related API failures and make the UI respond consistently.
+      // This prevents scattered "if 401 then ..." logic across screens.
       // 401 => logout + login
       if (code === "AUTH_UNAUTHENTICATED" || code === "AUTH_TOKEN_EXPIRED") {
         logout();
@@ -43,11 +45,14 @@ function AuthErrorListener() {
 
       // 403 => either MFA flow or forbidden or login (fail closed)
       if (code === "RBAC_INSUFFICIENT_ROLE") {
+        // Example: user has a valid token but is not allowed to use this admin surface.
         navigate("/forbidden", { replace: true });
         return;
       }
 
       if (code === "AUTH_FORBIDDEN") {
+        // Fail closed: if the backend says we are forbidden and we can't reconcile it locally,
+        // drop the session and require a fresh login.
         logout();
         navigate("/login", { replace: true });
         return;
@@ -62,6 +67,8 @@ function LoginRoute() {
   const { status, isBootstrapping } = useAuth();
 
   if (isBootstrapping) return <FullPageLoading />;
+  // Post-login routing is entirely driven by AuthContext status.
+  // This keeps edge cases (MFA required, expired session) consistent.
   if (status === "AUTHENTICATED") return <Navigate to="/app" replace />;
   if (status === "MFA_SETUP_REQUIRED") return <Navigate to="/mfa/setup" replace />;
   if (status === "MFA_CHALLENGE") return <Navigate to="/mfa/challenge" replace />;
@@ -106,6 +113,9 @@ function AdminShellRoute() {
   const safeModule = getSafeModule(requestedModule);
 
   useEffect(() => {
+    // This enforces a safe landing module based on current RBAC permissions.
+    // If the URL asks for a module the user doesn't have access to, we redirect to the
+    // first authorized module (or /forbidden if none).
     if (!safeModule) {
       navigate("/forbidden", { replace: true });
       return;

@@ -53,8 +53,9 @@ function extractRequestMeta(request: FastifyRequest): RequestMeta {
   // Why this exists: auth endpoints should record consistent security telemetry
   // (IP, UA, requestId, method, path) for audit and incident response.
   const userAgent = request.headers['user-agent'];
-  const requestIdHeader = request.headers['x-request-id'] ?? request.headers['x-correlation-id'];
-  // Why: prefer upstream correlation IDs when present; otherwise fall back to Fastify's request.id.
+  const requestIdHeader = request.headers['x-request-id'];
+  // Note: Correlation (flow) ID is available as request.correlationId (x-correlation-id).
+  // Request ID here is per-request; prefer x-request-id if present, else fall back to Fastify request.id.
   const requestId = typeof requestIdHeader === 'string' && requestIdHeader.trim() ? requestIdHeader.trim() : String(request.id);
   return {
     ip: request.ip,

@@ -8,6 +8,8 @@ export type AuthErrorEventDetail = {
 };
 
 export function emitAuthErrorEvent(detail: AuthErrorEventDetail) {
+  // Simple event bus for auth failures.
+  // This avoids sprinkling navigation side effects (logout/redirect) throughout API callers.
   window.dispatchEvent(new CustomEvent<AuthErrorEventDetail>(AUTH_ERROR_EVENT, { detail }));
 }
 

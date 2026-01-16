@@ -17,6 +17,10 @@ function base64UrlDecodeToString(input: string): string {
 }
 
 export function decodeJwtPayload(token: string): DecodedJwtPayload {
+  // NOTE: This does NOT verify the JWT signature.
+  // In a browser-only client we can safely *read* claims to drive UX (e.g., show admin-only UI
+  // or compute expiry), but we must never treat this as a security boundary.
+  // The backend verifies JWTs and enforces authorization on every request.
   const parts = token.split(".");
   if (parts.length !== 3) return {};
   try {

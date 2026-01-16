@@ -93,7 +93,7 @@ export function requirePermission(permission: PermissionCode) {
     if (!ok) {
       // Why: permission denials are security events (auditability + detection).
       await tryInsertSecurityEvent(request.server.db, {
-        requestId: (request as FastifyRequest & { auditRequestId?: string }).auditRequestId ?? String(request.id),
+        requestId: request.auditRequestId ?? String(request.id),
         eventType: 'auth.permission_denied',
         actorUserId: user.userId,
         actorSystemRole: user.role,

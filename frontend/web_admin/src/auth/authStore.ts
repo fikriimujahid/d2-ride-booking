@@ -8,7 +8,16 @@ const STORAGE_KEY = "rideadmin.auth";
  * Auth State - Tokens + Admin Context
  *
  * Stores both authentication tokens and the admin's authorization context.
- * This is persisted in sessionStorage (cleared on tab close for security).
+ *
+ * Storage choice:
+ * - We use `sessionStorage` (tab-scoped) so tokens do not persist across browser restarts.
+ * - This reduces the "long-lived token on shared machine" risk compared to `localStorage`.
+ *
+ * Important: anything accessible to JS is still vulnerable to XSS.
+ * We treat this as a pragmatic tradeoff for a SPA and rely on:
+ * - short-lived access tokens
+ * - refresh rotation on the backend
+ * - backend-enforced authz for every request
  */
 export type AuthState = {
   access_token: string;
@@ -119,10 +128,16 @@ function parseAuthState(value: unknown): AuthState | null {
 
 export const authStore = {
   get(): AuthState | null {
+    // Single read location for auth state.
+    // Keeping this centralized prevents "half logged-in" UI states.
     return safeParse(sessionStorage.getItem(STORAGE_KEY));
   },
 
   set(state: AuthState) {
+    // Persist the *minimum* we need for UX:
+    // - tokens for API requests
+    // - user identity for display
+    // - permissions for UI gating
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   },
 
@@ -165,6 +180,9 @@ export const authStore = {
   },
 
   hasPermission(permissionKey: string): boolean {
+    // UX-only guard.
+    // This prevents rendering controls the user can't use, but it is NOT a security boundary.
+    // Backend permission checks are still required (and authoritative).
     const ctx = this.getAdminContext();
     if (ctx?.permissions) {
       if (ctx.permissions.includes("*")) return true;

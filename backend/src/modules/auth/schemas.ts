@@ -70,7 +70,7 @@ export const roleLoginBodySchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    email: { type: 'string', minLength: 3, maxLength: 320 },
+    email: { type: 'string', format: 'email', minLength: 5, maxLength: 320 },
     password: { type: 'string', minLength: 8, maxLength: 200 },
     otp: { type: 'string', minLength: 6, maxLength: 6, pattern: '^[0-9]{6}$' }
   },

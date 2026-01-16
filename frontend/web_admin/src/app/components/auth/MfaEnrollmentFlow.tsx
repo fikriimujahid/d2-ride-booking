@@ -20,6 +20,8 @@ export function MfaEnrollmentFlow(props: MfaEnrollmentFlowProps) {
   const { logout } = useAuth();
 
   const forceLogoutToLogin = async () => {
+    // MFA enrollment is sensitive.
+    // If anything looks off (expired setup token, auth errors), we fail closed and require re-login.
     logout();
     props.onDone();
   };
@@ -116,6 +118,8 @@ function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => voi
       setIsLoading(true);
       setError(null);
       try {
+        // Backend returns the QR code + shared secret bound to the current setup token.
+        // Frontend does not generate secrets and does not decide whether enrollment is required.
         const res = await startTotpEnrollment();
         if (cancelled) return;
 
@@ -124,6 +128,8 @@ function ScanQrCode(props: { onSuccess: () => void; onReloginRequired: () => voi
         setQrImage(res.qrCodeDataUrl);
       } catch (e) {
         const err = e as ApiError;
+        // 401/403 here means the enrollment token/session is no longer valid.
+        // We treat this as "session expired" and send user back to login.
         if (err?.code === "AUTH_UNAUTHENTICATED" || err?.code === "AUTH_FORBIDDEN" || err?.status === 401 || err?.status === 403) {
           setError("Your session expired. Please sign in again.");
         } else {

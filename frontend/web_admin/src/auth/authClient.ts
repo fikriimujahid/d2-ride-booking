@@ -77,6 +77,11 @@ function parseAdminLoginStep1Response(value: unknown): AdminLoginStep1Response {
 
 export const authClient = {
   async login(email: string, password: string): Promise<AdminLoginResult> {
+    // Step 1: POST credentials to the role-scoped admin login endpoint.
+    // Backend is responsible for:
+    // - password verification
+    // - deciding whether MFA is required
+    // - issuing tokens (only after MFA completes)
     const response = await authFetch<unknown>("/admin/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
@@ -85,15 +90,24 @@ export const authClient = {
     const step1 = parseAdminLoginStep1Response(response);
 
     if ("twoFactorRequired" in step1 && step1.twoFactorRequired) {
+      // MFA enrollment is required before admin can get tokens.
+      // Frontend only stores the temporary setup token (in memory via AuthContext),
+      // then calls setup/verify endpoints to complete enrollment.
       return { kind: "MFA_SETUP_REQUIRED", setupToken: step1.setupToken, expiresAt: step1.expiresAt };
     }
 
     if ("challengeName" in step1 && step1.challengeName === "SOFTWARE_TOKEN_MFA") {
+      // MFA is already enrolled; backend challenges for OTP.
+      // At this point we still have NO access/refresh tokens.
       return { kind: "MFA_CHALLENGE", session: step1.session, expiresAt: step1.expiresAt };
     }
 
     if ("accessToken" in step1 && "refreshToken" in step1 && "expiresAt" in step1) {
+      // Tokens are only stored after the backend has fully authenticated the admin.
       await this.storeTokens({ tokens: step1, email });
+
+      // Permissions are hydrated separately from the token.
+      // This keeps tokens smaller and avoids baking mutable RBAC state into JWTs.
       await this.hydratePermissionsBestEffort();
       return { kind: "AUTHENTICATED" };
     }
@@ -102,6 +116,8 @@ export const authClient = {
   },
 
   async respondToMfaChallenge(params: { session: string; otp: string; email?: string | null }): Promise<void> {
+    // Step 2: submit the one-time password for an MFA challenge.
+    // Backend validates OTP and (on success) returns access+refresh tokens.
     const response = await authFetch<unknown>("/admin/auth/login/mfa", {
       method: "POST",
       body: JSON.stringify({ session: params.session, otp: params.otp }),
@@ -113,6 +129,8 @@ export const authClient = {
   },
 
   async startTotpSetup(setupToken: string): Promise<AdminTotpSetup> {
+    // Enrollment is protected by a temporary setup token (NOT the normal access token).
+    // Backend decides whether a setup token is valid and what secrets/QR to return.
     const url = `${getAuthApiBase()}/admin/auth/2fa/setup`;
     const res = await fetch(url, {
       method: "POST",
@@ -143,6 +161,7 @@ export const authClient = {
   },
 
   async verifyTotpSetup(params: { setupToken: string; otp: string; email?: string | null }): Promise<void> {
+    // Enrollment completion. Backend validates the OTP and issues the real token pair.
     const url = `${getAuthApiBase()}/admin/auth/2fa/verify`;
     const res = await fetch(url, {
       method: "POST",
@@ -170,6 +189,8 @@ export const authClient = {
   },
 
   async refresh(): Promise<void> {
+    // Token refresh is used when access token expires (401 from API).
+    // Backend validates refresh token, rotates it, and issues a new access token.
     const currentRefreshToken = authStore.getRefreshToken();
     if (!currentRefreshToken) {
       throw new Error("No refresh token available");
@@ -191,6 +212,8 @@ export const authClient = {
   async logout(): Promise<void> {
     const refreshToken = authStore.getRefreshToken();
 
+    // Clear local state first so the UI immediately becomes UNAUTHENTICATED.
+    // This is safe because the backend remains the enforcement point.
     authStore.clear();
 
     if (refreshToken) {
@@ -200,12 +223,15 @@ export const authClient = {
           body: JSON.stringify({ refreshToken }),
         });
       } catch {
-        // ignore
+        // Best-effort: don't block logout UX on network failures.
+        // Backend refresh rotation still limits how long a stolen token remains useful.
       }
     }
   },
 
   async bootstrap(): Promise<void> {
+    // Bootstrap runs on app start if we have stored tokens.
+    // It validates freshness and refreshes if needed.
     const state = authStore.get();
     if (!state) {
       throw new Error("No stored auth state");
@@ -227,10 +253,15 @@ export const authClient = {
   async storeTokens(params: { tokens: TokenResponse; email?: string | null }): Promise<void> {
     const { tokens, email } = params;
 
+    // We decode the access token payload client-side to extract identity info.
+    // This is a UX convenience only; backend verifies and enforces.
     const decoded = decodeJwtPayload(tokens.accessToken);
     const userId = typeof decoded.sub === "string" ? decoded.sub : "";
     const role = typeof decoded.role === "string" ? decoded.role : "ADMIN";
     if (role !== "ADMIN") {
+      // Defensive client-side check.
+      // Prevents accidentally using a non-admin token in Web Admin if a client bug occurs.
+      // Backend also enforces role-scoped login endpoints.
       authStore.clear();
       throw new Error("Only ADMIN users can sign in to Web Admin");
     }
@@ -256,6 +287,8 @@ export const authClient = {
       adminContext: {
         identity: { id: userId, email: safeEmail },
         roles: user.roles,
+        // Permissions are hydrated separately via /admin/auth/permissions.
+        // Until then, we treat permissions as empty (fail closed in UI).
         permissions: user.permissions,
       },
     };
@@ -268,6 +301,8 @@ export const authClient = {
     if (!accessToken) return;
 
     try {
+      // Permissions are fetched from the backend (source of truth).
+      // This lets the backend change RBAC without forcing token re-issue for every permission update.
       const url = `${getAuthApiBase()}/admin/auth/permissions`;
       const res = await fetch(url, {
         method: "GET",
@@ -283,6 +318,8 @@ export const authClient = {
       const data: unknown = isJson ? await res.json().catch(() => undefined) : await res.text().catch(() => undefined);
 
       if (!res.ok) {
+        // 403 here means "your token is valid, but you don't have permission to query permissions".
+        // Web Admin treats this as "no permissions available" and fails closed at the UI layer.
         if (res.status === 403) return;
         const message = extractErrorMessageFromBody(data, res.status);
         throw new Error(message);

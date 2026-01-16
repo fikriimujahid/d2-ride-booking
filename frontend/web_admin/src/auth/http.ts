@@ -25,6 +25,8 @@ export async function authFetch<T>(endpoint: string, options: RequestInit = {}):
     : await response.text().catch(() => undefined);
 
   if (!response.ok) {
+    // Keep error mapping centralized.
+    // Callers (authClient/AuthContext) decide which UX to show (login error vs MFA state).
     const message = extractErrorMessageFromBody(data, response.status);
     throw new Error(message);
   }
